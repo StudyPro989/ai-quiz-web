@@ -113,11 +113,15 @@ export function validateLocal(raw, cfg) {
       q.acceptableAnswers = [String(q.answer).toLowerCase().trim()];
     }
     if (!skipTopicCheck) {
-      const hay = `${q.question} ${q.passage || ""} ${(q.subQuestions || []).map(sq => sq.question).join(" ")}`.toLowerCase();
-      if (kw.some(k => hay.includes(k))) onTopic++;
+      const hay = `${q.question} ${(q.options || []).map(o => o.text).join(" ")} ${typeof q.answer === "string" ? q.answer : ""} ${q.explanation || ""} ${q.passage || ""} ${(q.subQuestions || []).map(sq => sq.question).join(" ")}`.toLowerCase();
+      const hit = kw.some(k => {
+        const v = [k, k + "s", k.replace(/s$/, "")].filter((x, i, a) => x.length > 3 && a.indexOf(x) === i);
+        return v.some(x => hay.includes(x));
+      });
+      if (hit) onTopic++;
     }
   }
-  if (!skipTopicCheck && onTopic === 0) return { error: `AI drifted off-topic (expected "${cfg.topic}").` };
+  if (!skipTopicCheck && d.questions.length >= 3 && (onTopic === 0 || onTopic / d.questions.length < 1 / 3)) return { error: `AI drifted off-topic (expected "${cfg.topic}").` };
   return { quiz: { title: d.title || `Class ${cfg.class} ${cfg.subject} - ${cfg.topic}`, class: cfg.class, subject: cfg.subject, medium: cfg.medium, topic: cfg.topic, difficulty: cfg.difficulty, questionTypes: cfg.questionTypes, questions: d.questions, createdAt: new Date().toISOString() } };
 }
 
@@ -168,7 +172,7 @@ export async function generateQuizDirect(cfg, key, model) {
     const chunkCfg = { ...cfg, questionCount: n };
     let lastErr = "unknown error";
     let got = null;
-    for (const wait of [0, 10000, 25000]) {
+    for (const wait of [0, 6000, 15000]) {
       if (wait) await sleep(wait);
       try {
         const raw = await geminiCall(buildPromptLocal(chunkCfg), key, model);
