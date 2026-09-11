@@ -32,6 +32,9 @@ jobs:
         env:
           VITE_BASE: /${{ github.event.repository.name }}/
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          # Built-in site key (never in git). Add repo secret VITE_GEMINI_KEY;
+          # restrict that key to https://<user>.github.io/* in Google AI Studio.
+          VITE_GEMINI_KEY: ${{ secrets.VITE_GEMINI_KEY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: client/dist
