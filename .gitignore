@@ -1,0 +1,19 @@
+# Secrets — never commit these
+*.env
+.env
+.env.*
+!.env.example
+Groq.txt
+tmpkey.txt
+*key*.txt
+
+# Dependencies & build output (any level)
+**/node_modules/
+**/dist/
+dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.vscode/

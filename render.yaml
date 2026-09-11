@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: ai-quiz-app
+    runtime: node
+    plan: free
+    buildCommand: npm --prefix server install && npm --prefix client install && npm --prefix client run build
+    startCommand: npm --prefix server start
+    envVars:
+      - key: AI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: AI_PROVIDER
+        value: gemini
+      - key: AI_MODEL
+        value: openai/gpt-oss-120b
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
