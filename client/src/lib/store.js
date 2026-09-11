@@ -1,4 +1,4 @@
-const K = { quizzes: "quizapp.quizzes.v1", results: "quizapp.results.v1", settings: "quizapp.settings.v1" };
+const K = { quizzes: "quizapp.quizzes.v1", results: "quizapp.results.v1", settings: "quizapp.settings.v1", keys: "quizapp.keys.v1" };
 const read = (k, fb) => { try { return JSON.parse(localStorage.getItem(k)) ?? fb; } catch { return fb; } };
 const write = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 export const store = {
@@ -14,6 +14,8 @@ export const store = {
   results: () => read(K.results, []),
   saveResult(r) { const all = read(K.results, []); all.unshift(r); write(K.results, all.slice(0, 200)); },
   settings: () => read(K.settings, { model: "", theme: "light", defaults: {} }),
-  saveSettings(s) { write(K.settings, s); }
+  saveSettings(s) { write(K.settings, s); },
+  keys: () => read(K.keys, { gemini: "" }),
+  saveKeys(k) { write(K.keys, k); }
 };
 export const uid = () => "z" + Math.random().toString(36).slice(2, 9);

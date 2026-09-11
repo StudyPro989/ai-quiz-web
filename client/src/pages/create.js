@@ -1,5 +1,6 @@
 import { CLASSES, MEDIUMS, DIFFICULTIES, COUNTS, QUESTION_TYPES, SUBJECTS_BY_CLASS, SUB_SUBJECTS, chaptersFor } from "../data/curriculum.js";
 import { apiGenerate, apiModels, apiHealth } from "../lib/api.js";
+import { generateQuizDirect } from "../lib/localAI.js";
 import { store, uid } from "../lib/store.js";
 
 const LOADS = ["Preparing your quiz...", "Generating questions...", "Preparing answers...", "Checking generated questions...", "Almost ready..."];
@@ -30,10 +31,7 @@ export function renderCreate(el, ctx) {
   <div id="f-err"></div>`;
 
   const $ = (id) => el.querySelector(id);
-  apiHealth().then(h => { if (!h || h.ok !== true) throw 0; }).catch(() => {
-    const c = $("#f-conn");
-    if (c) c.innerHTML = `<div class="card" style="border:1.5px solid #facc15;background:#fffbeb"><b>⚠️ AI server not connected.</b><p class=mut style="margin:6px 0 0">This static link has no backend, so quizzes can't generate here. Run <b>npm run dev</b> on your computer, or deploy the backend (see README → Publishing online) for a fully working link.</p></div>`;
-  });
+  apiHealth().then(h => { if (!h || h.ok !== true) throw 0; backendUp = true; paintConn(); }).catch(() => paintConn());
   const selTypes = new Set();
   el.querySelectorAll(".chip").forEach(ch => ch.onclick = () => { const t = ch.dataset.t; selTypes.has(t) ? selTypes.delete(t) : selTypes.add(t); ch.classList.toggle("on"); });
   const syncSub = () => {
@@ -56,7 +54,9 @@ export function renderCreate(el, ctx) {
   $("#f-class").onchange = syncSub; $("#f-sub").onchange = syncBranch; $("#f-branch").onchange = syncCh;
   if (d.class) { $("#f-class").value = d.class; syncSub(); if (d.subject) { $("#f-sub").value = d.subject; syncCh(); } }
   else { syncSub(); }
+  let backendUp = false;
   apiModels().then(m => {
+    backendUp = true;
     const provs = m.providers?.length ? m.providers : ["groq"];
     const byProv = m.modelsByProvider || {};
     const preProv = ctx?.prefill?.provider;
@@ -70,7 +70,20 @@ export function renderCreate(el, ctx) {
       $("#f-model").innerHTML = list.map(x => `<option ${x === def ? "selected" : ""}>${x}</option>`).join("");
     };
     $("#f-provider").onchange = fill; fill();
-  }).catch(() => { $("#f-model").innerHTML = `<option>openai/gpt-oss-120b</option>`; });
+    paintConn();
+  }).catch(() => {
+    $("#f-provider").innerHTML = `<option>gemini</option>`;
+    $("#f-model").innerHTML = `<option>gemini-2.5-flash</option><option>gemini-2.5-flash-lite</option><option>gemini-2.5-pro</option>`;
+    paintConn();
+  });
+  function paintConn() {
+    const hasKey = !!store.keys().gemini;
+    if (backendUp || hasKey) {
+      $("#f-conn").innerHTML = backendUp ? "" : `<div class="card" style="border:1.5px solid #a7e3c0;background:#f0fdf4"><b>🔑 Backend-free mode.</b><p class=mut style="margin:6px 0 0">No server found — generating with your saved browser key (Gemini, direct). Everything stays on this page.</p></div>`;
+      return;
+    }
+    $("#f-conn").innerHTML = "";
+  }
 
   let busy = false;
   $("#f-go").onclick = async () => {
@@ -83,22 +96,40 @@ export function renderCreate(el, ctx) {
     busy = true;
     const btn = $("#f-go"); btn.disabled = true;
     let li = 0;
-    const target = `Class ${payload.class} · ${payload.subject}${payload.subSubject ? " (" + payload.subSubject + ")" : ""} · ${payload.topic} · ${payload.questionCount} Qs`;
+    const target = `Class ${payload.class} · ${payload.subject}${payload.subSubject ? " (" + payload.subSubject + ")" : ""} · ${payload.topic} · ${payload.questionCount} Qs · ${backendUp ? payload.provider + "/" + payload.model : "direct/browser-key"}`;
     $("#f-msg").textContent = `Generating for ${target}...`;
     const iv = setInterval(() => { li = (li + 1) % LOADS.length; $("#f-msg").textContent = `${LOADS[li]} (${target})`; }, 1600);
     btn.innerHTML = `<span class="spin"></span> Generating...`;
+    const doneBtn = () => { busy = false; btn.disabled = false; btn.textContent = "🚀 Generate Quiz"; };
     try {
-      const j = await apiGenerate(payload);
-      clearInterval(iv);
-      const quiz = { ...j.quiz, id: uid(), config: payload, demo: !!j.demo };
+      let quiz;
+      if (backendUp) {
+        const j = await apiGenerate(payload);
+        clearInterval(iv);
+        quiz = { ...j.quiz, id: uid(), config: payload };
+      } else {
+        const key = store.keys().gemini;
+        if (!key) { clearInterval(iv); showNoKey(target); doneBtn(); return; }
+        const model = payload.provider === "gemini" ? payload.model : "gemini-2.5-flash";
+        const q = await generateQuizDirect({ ...payload, provider: "gemini" }, key, model);
+        clearInterval(iv);
+        quiz = { ...q, id: uid(), config: { ...payload, provider: "gemini", model } };
+      }
       store.saveQuiz(quiz);
       location.hash = `#/quiz/${quiz.id}`;
     } catch (e) {
       clearInterval(iv);
       showGenError(target, payload, e);
-      busy = false; btn.disabled = false; btn.textContent = "🚀 Generate Quiz";
+      doneBtn();
     }
   };
+  function showNoKey(target) {
+    $("#f-err").innerHTML = `<div class="card" style="border:1.5px solid #facc15;background:#fffbeb"><h3>🔑 Add your Gemini key to generate here</h3>
+      <p><b>Tried:</b> ${target}</p>
+      <p class=mut>This published link has no backend, so it generates straight from your browser. Paste a free key once in Settings (kept only on this device) and generate again.</p>
+      <div style="margin-top:10px"><a class="btn" href="#/settings">Open Settings → add key</a></div></div>`;
+    $("#f-err").scrollIntoView({ behavior: "smooth", block: "center" });
+  }
   function showGenError(target, payload, e) {
     const at = new Date().toLocaleString();
     const ref = e.requestId ? ` · Ref: ${e.requestId}` : "";

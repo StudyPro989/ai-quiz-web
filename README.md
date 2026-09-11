@@ -59,9 +59,27 @@ GitHub Pages hosts **static files only** — it cannot run the Node backend, and
 A workflow (`.github/workflows/pages.yml`) is included — push to `main` and it builds `client/` automatically.
 1. On GitHub: repo **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 2. Your app link becomes `https://YOUR-USERNAME.github.io/REPO-NAME/` (no README — the real UI).
-3. Note: Pages has no backend, so generating shows a clear "AI server not connected" notice until you connect one: deploy the backend on Render, then add repo secret `VITE_API_URL` = your Render URL (**Settings → Secrets → Actions**) and re-run the workflow — the same public link then generates real quizzes.
+3. Note: Pages has no backend — but the app now works there anyway via **backend-free mode**: add your free Gemini key once in **Settings → My AI Key** (kept only in that browser, never uploaded). The published link then generates real quizzes straight from your browser, no server needed. For a shared backend instead, deploy on Render/HF and set repo secret `VITE_API_URL`.
 
 **Alternative frontend hosts (Vercel or Netlify)**
 1. Import the same repo; set root directory to `client`, build command `npm run build`, output `dist`.
 2. Add env var `VITE_API_URL=https://ai-quiz-app.onrender.com` (your Render URL).
 3. Deploy — full app live, keys stay on the backend where they belong.
+
+## Avoiding Render's sleep delay (still free)
+Render free sleeps after ~15 min idle. Easiest fix — keep it warm with a free pinger:
+1. Deploy on Render as above.
+2. Sign up free at https://uptimerobot.com → Add Monitor → Monitor Type HTTP(s) → URL `https://YOUR-APP.onrender.com/api/health` → interval 5 min → Create.
+3. Done — pings keep the instance awake, quizzes start instantly. (This uses the built-in health endpoint; no code change needed.)
+
+## Backend on Hugging Face Spaces (free, sleeps only after 48h idle)
+1. Sign up at https://huggingface.co → **New Space** → name it `ai-quiz-app` → SDK **Docker** → Blank → Create.
+2. Push this repo's code to the Space (in its page: **Files → Add file → Upload**, or `git push` to the Space remote).
+3. Space **Settings → Repository secrets**: add `AI_API_KEY` and `GEMINI_API_KEY` (real keys, never in git).
+4. The Space auto-builds (`Dockerfile` included) and goes live at `https://YOUR-USER-ai-quiz-app.hf.space` — full app + API together. Check `/api/health`.
+
+## Other free backend options (no sleep)
+- **Instant public link from your PC (free, no signup):** install `cloudflared` (`winget install cloudflare.cloudflared`), run `npm run dev` in one terminal and `cloudflared tunnel --url http://localhost:3001` in another — you get a public `https://…trycloudflare.com` link to the full app. Stays up while your PC is on; URL changes on restart.
+- **Hugging Face Spaces (free, Docker):** New Space → Docker SDK → upload repo (`Dockerfile` included; set `AI_API_KEY`/`GEMINI_API_KEY` as Space secrets). Sleeps only after 48h idle.
+- **Oracle Cloud Always-Free VM (free forever, never sleeps):** needs a cloud account + basic Linux setup — most work, but a real always-on server at zero cost.
+- **Your own repo + `Dockerfile`/`render.yaml` included** work on Fly.io, Railway, Koyeb too if you ever outgrow free tiers.

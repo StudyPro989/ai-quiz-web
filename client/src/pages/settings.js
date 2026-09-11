@@ -1,5 +1,6 @@
 import { store } from "../lib/store.js";
 import { apiModels } from "../lib/api.js";
+import { testGeminiKey } from "../lib/localAI.js";
 import { CLASSES, MEDIUMS, DIFFICULTIES, COUNTS, SUBJECTS_BY_CLASS } from "../data/curriculum.js";
 export function renderSettings(el) {
   const s = store.settings();
@@ -14,7 +15,11 @@ export function renderSettings(el) {
     <div><label>Default difficulty</label><select id="s-d"><option value="">—</option>${DIFFICULTIES.map(x => `<option value="${x.toLowerCase()}">${x}</option>`).join("")}</select></div>
     <div><label>Default count</label><select id="s-n"><option value="">—</option>${COUNTS.map(n => `<option>${n}</option>`).join("")}</select></div>
   </div>
-  <div style="margin-top:12px"><button class="btn" id="s-save">Save</button> <span id="s-msg" class=mut></span></div></div>`;
+  <div style="margin-top:12px"><button class="btn" id="s-save">Save</button> <span id="s-msg" class=mut></span></div></div>
+  <div class="card"><h3>🔑 My AI Key (for published / Pages link)</h3>
+  <p class=mut>Paste your own Gemini key to generate quizzes without any backend — the key stays only in this browser (never uploaded anywhere). Get one free at <b>aistudio.google.com/apikey</b>. Tip: restrict it to your site in Google AI Studio → API controls.</p>
+  <label>Gemini API Key</label><input id="s-key" type="password" placeholder="AIza…" autocomplete="off" />
+  <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec" id="s-test">Test Key</button><button class="btn ghost" id="s-del">Remove</button> <span id="s-kmsg" class=mut></span></div></div>`;
   const $ = (id) => el.querySelector(id);
   $("s-theme").value = s.theme || "light";
   Object.assign($("s-c"), { value: s.defaults?.class || "" });
@@ -34,7 +39,18 @@ export function renderSettings(el) {
   });
   $("s-save").onclick = () => {
     store.saveSettings({ provider: $("s-provider").value, model: $("s-model").value, theme: $("s-theme").value, defaults: { class: $("s-c").value, medium: $("s-m").value, difficulty: $("s-d").value, count: $("s-n").value } });
+    const k = $("s-key").value.trim();
+    if (k) store.saveKeys({ gemini: k });
     document.body.classList.toggle("dark", $("s-theme").value === "dark");
     $("s-msg").textContent = "Saved.";
   };
+  const keys = store.keys();
+  if (keys.gemini) $("s-key").placeholder = "Key saved ✓ (paste new to replace)";
+  $("s-test").onclick = async () => {
+    const k = $("s-key").value.trim() || store.keys().gemini;
+    $("s-kmsg").textContent = "Checking...";
+    try { await testGeminiKey(k); $("s-kmsg").textContent = "✓ Key works."; }
+    catch (e) { $("s-kmsg").textContent = "✗ " + e.message; }
+  };
+  $("s-del").onclick = () => { store.saveKeys({ gemini: "" }); $("s-key").value = ""; $("s-key").placeholder = "AIza…"; $("s-kmsg").textContent = "Removed."; };
 }

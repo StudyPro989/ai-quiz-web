@@ -1,6 +1,7 @@
 import { store } from "../lib/store.js";
 import { apiRegenerate } from "../lib/api.js";
 import { checkQuestion, optText, esc, isCheckable } from "../components/questions.js";
+import { regenerateDirect } from "../lib/localAI.js";
 
 const TYPE_LABEL = { mcq: "MCQ", true_false: "True / False", fill_blank: "Fill in the Blank", one_word: "One-Word", short_answer: "Short Answer", long_answer: "Long Answer", assertion_reason: "Assertion & Reason", match: "Match the Following", case_based: "Case-Based" };
 const REASONS = [["wrong_answer", "Answer is wrong"], ["bad_options", "Options are wrong / duplicated"], ["off_topic", "Not on my chapter"], ["unclear", "Question unclear"], ["wrong_level", "Too hard / easy for my class"], ["other", "Other"]];
@@ -127,23 +128,41 @@ export function renderRunner(el, id) {
     const go = el.querySelector("#rep-go");
     if (go) go.onclick = async () => {
       st.rep.busy = true; st.rep.err = ""; paint();
-      try {
-        const nq = await apiRegenerate({
-          class: quiz.class, subject: quiz.subject, medium: quiz.medium, topic: quiz.topic,
-          difficulty: quiz.difficulty, type: q.type, badQuestion: q.question,
-          badOptions: (q.options || []).map(o => o.text).join(" | "),
-          reason: st.rep.reason, note: st.rep.note, provider: quiz.config?.provider || store.settings().provider || undefined, model: store.settings().model || undefined
-        });
+      const base = {
+        class: quiz.class, subject: quiz.subject, medium: quiz.medium, topic: quiz.topic,
+        difficulty: quiz.difficulty, type: q.type, badQuestion: q.question,
+        badOptions: (q.options || []).map(o => o.text).join(" | "),
+        reason: st.rep.reason, note: st.rep.note
+      };
+      const finishOk = (nq) => {
         nq.id = q.id; nq.regenerated = true;
         quiz.questions[st.idx] = nq;
         delete st.ans[q.id];
         store.saveQuiz(quiz);
         st.rep = { done: true };
         paint();
-      } catch (e) {
+      };
+      const failShow = (e) => {
         st.rep.busy = false;
         st.rep.err = `Bug: ${e.message || "Regeneration failed. Please try again."}${e.requestId ? ` [Ref: ${e.requestId}]` : ""} — press the button again to retry.`;
         paint();
+      };
+      try {
+        const nq = await apiRegenerate({ ...base, provider: quiz.config?.provider || store.settings().provider || undefined, model: store.settings().model || undefined });
+        finishOk(nq);
+      } catch (e) {
+        const offline = e.status === 404 || /fetch|network|load failed/i.test(e.message || "");
+        const key = store.keys().gemini;
+        if (!offline || !key) { failShow(e); return; }
+        try {
+          const model = (quiz.config?.provider === "gemini" ? quiz.config?.model : null) || "gemini-2.5-flash";
+          const nq = await regenerateDirect(
+            { class: quiz.class, subject: quiz.subject, medium: quiz.medium, topic: quiz.topic, difficulty: quiz.difficulty, questionTypes: [q.type] },
+            { type: q.type, badQuestion: base.badQuestion, badOptions: base.badOptions, reason: base.reason, note: base.note },
+            key, model
+          );
+          finishOk(nq);
+        } catch (e2) { failShow(e2); }
       }
     };
   }
