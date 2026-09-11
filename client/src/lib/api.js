@@ -1,4 +1,12 @@
 const API = import.meta.env.VITE_API_URL || "";
+// Used when no backend is reachable (published static link): Gemini direct from browser.
+export const LOCAL_AI = {
+  providers: ["gemini"],
+  defaultProvider: "gemini",
+  modelsByProvider: { gemini: ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"] },
+  defaultModel: "gemini-2.5-flash",
+  models: ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
+};
 function errOf(r, j, fb, extra) {
   const e = new Error(j.error || fb);
   e.status = r.status; e.requestId = j.requestId; e.extra = extra;

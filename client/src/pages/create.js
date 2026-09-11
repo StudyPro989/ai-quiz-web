@@ -1,5 +1,5 @@
 import { CLASSES, MEDIUMS, DIFFICULTIES, COUNTS, QUESTION_TYPES, SUBJECTS_BY_CLASS, SUB_SUBJECTS, chaptersFor } from "../data/curriculum.js";
-import { apiGenerate, apiModels, apiHealth } from "../lib/api.js";
+import { apiGenerate, apiModels, apiHealth, LOCAL_AI } from "../lib/api.js";
 import { generateQuizDirect } from "../lib/localAI.js";
 import { store, uid } from "../lib/store.js";
 
@@ -72,8 +72,10 @@ export function renderCreate(el, ctx) {
     $("#f-provider").onchange = fill; fill();
     paintConn();
   }).catch(() => {
-    $("#f-provider").innerHTML = `<option>gemini</option>`;
-    $("#f-model").innerHTML = `<option>gemini-2.5-flash</option><option>gemini-2.5-flash-lite</option><option>gemini-2.5-pro</option>`;
+    const m = LOCAL_AI;
+    $("#f-provider").innerHTML = m.providers.map(p => `<option>${p}</option>`).join("");
+    const list = m.modelsByProvider.gemini;
+    $("#f-model").innerHTML = list.map(x => `<option>${x}</option>`).join("");
     paintConn();
   });
   function paintConn() {

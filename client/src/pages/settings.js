@@ -1,5 +1,5 @@
 import { store } from "../lib/store.js";
-import { apiModels } from "../lib/api.js";
+import { apiModels, LOCAL_AI } from "../lib/api.js";
 import { testGeminiKey } from "../lib/localAI.js";
 import { CLASSES, MEDIUMS, DIFFICULTIES, COUNTS, SUBJECTS_BY_CLASS } from "../data/curriculum.js";
 export function renderSettings(el) {
@@ -36,6 +36,10 @@ export function renderSettings(el) {
       $("s-model").innerHTML = list.map(x => `<option ${x === def ? "selected" : ""}>${x}</option>`).join("");
     };
     $("s-provider").onchange = fill; fill();
+  }).catch(() => {
+    const m = LOCAL_AI;
+    $("s-provider").innerHTML = m.providers.map(p => `<option>${p}</option>`).join("");
+    $("s-model").innerHTML = m.models.map(x => `<option>${x}</option>`).join("");
   });
   $("s-save").onclick = () => {
     store.saveSettings({ provider: $("s-provider").value, model: $("s-model").value, theme: $("s-theme").value, defaults: { class: $("s-c").value, medium: $("s-m").value, difficulty: $("s-d").value, count: $("s-n").value } });
