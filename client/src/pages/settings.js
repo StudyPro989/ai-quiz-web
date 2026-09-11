@@ -22,64 +22,86 @@ export function renderSettings(el) {
   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec" id="s-test">Test Key</button><button class="btn ghost" id="s-del">Remove</button></div>
   <div id="s-kmsg" class=mut style="margin-top:8px"></div><div id="s-steps" class=mut style="margin-top:6px;font-size:12.5px"></div></div>`;
   const $ = (id) => el.querySelector(id);
-  $("s-theme").value = s.theme || "light";
-  Object.assign($("s-c"), { value: s.defaults?.class || "" });
-  $("s-m").value = s.defaults?.medium || ""; $("s-d").value = s.defaults?.difficulty || ""; $("s-n").value = s.defaults?.count || "";
+  const setV = (id, v) => { const n = $(id); if (n) n.value = v; };
+  const setH = (id, h) => { const n = $(id); if (n) n.innerHTML = h; };
+  const alive = () => el.isConnected;
+  setV("s-theme", s.theme || "light");
+  const sc = $("s-c"); if (sc) sc.value = s.defaults?.class || "";
+  setV("s-m", s.defaults?.medium || ""); setV("s-d", s.defaults?.difficulty || ""); setV("s-n", s.defaults?.count || "");
   apiModels().then(m => {
+    if (!alive()) return;
     const provs = m.providers?.length ? m.providers : ["groq"];
     const byProv = m.modelsByProvider || {};
     const curProv = provs.includes(s.provider) ? s.provider : (m.defaultProvider || provs[0]);
-    $("s-provider").innerHTML = provs.map(p => `<option ${p === curProv ? "selected" : ""}>${p}</option>`).join("");
+    setH("s-provider", provs.map(p => `<option ${p === curProv ? "selected" : ""}>${p}</option>`).join(""));
     const fill = () => {
-      const p = $("s-provider").value;
+      if (!alive()) return;
+      const sp = $("s-provider"), sm = $("s-model");
+      if (!sp || !sm) return;
+      const p = sp.value;
       const list = byProv[p]?.length ? byProv[p] : (m.models || []);
       const def = p === curProv ? (s.model || m.defaultModel || list[0]) : list[0];
-      $("s-model").innerHTML = list.map(x => `<option ${x === def ? "selected" : ""}>${x}</option>`).join("");
+      sm.innerHTML = list.map(x => `<option ${x === def ? "selected" : ""}>${x}</option>`).join("");
     };
-    $("s-provider").onchange = fill; fill();
+    const sp = $("s-provider");
+    if (sp) sp.onchange = fill;
+    fill();
   }).catch(() => {
+    if (!alive()) return;
     const m = LOCAL_AI;
-    $("s-provider").innerHTML = m.providers.map(p => `<option>${p}</option>`).join("");
-    $("s-model").innerHTML = m.models.map(x => `<option>${x}</option>`).join("");
+    setH("s-provider", m.providers.map(p => `<option>${p}</option>`).join(""));
+    setH("s-model", m.models.map(x => `<option>${x}</option>`).join(""));
   });
-  $("s-save").onclick = () => {
-    store.saveSettings({ provider: $("s-provider").value, model: $("s-model").value, theme: $("s-theme").value, defaults: { class: $("s-c").value, medium: $("s-m").value, difficulty: $("s-d").value, count: $("s-n").value } });
-    const k = $("s-key").value.trim();
+  const saveBtn = $("s-save");
+  if (saveBtn) saveBtn.onclick = () => {
+    const gv = (id) => { const n = $(id); return n ? n.value : ""; };
+    store.saveSettings({ provider: gv("s-provider"), model: gv("s-model"), theme: gv("s-theme"), defaults: { class: gv("s-c"), medium: gv("s-m"), difficulty: gv("s-d"), count: gv("s-n") } });
+    const k = gv("s-key").trim();
     if (k) store.saveKeys({ gemini: k });
-    document.body.classList.toggle("dark", $("s-theme").value === "dark");
-    $("s-msg").textContent = "Saved.";
+    document.body.classList.toggle("dark", gv("s-theme") === "dark");
+    const sm = $("s-msg");
+    if (sm) sm.textContent = "Saved.";
   };
   const keys = store.keys();
-  if (keys.gemini) $("s-key").placeholder = "Key saved ✓ (paste new to replace)";
-  $("s-test").onclick = async () => {
+  const sk = $("s-key");
+  if (keys.gemini && sk) sk.placeholder = "Key saved ✓ (paste new to replace)";
+  const testBtn = $("s-test");
+  if (testBtn) testBtn.onclick = async () => {
     const btn = $("s-test");
+    if (!btn) return;
     btn.disabled = true;
     const steps = (t) => { const d = $("s-steps"); if (d) d.innerHTML += `<div>• ${t}</div>`; };
-    $("s-steps").innerHTML = "";
-    const raw = $("s-key").value;
+    const km = $("s-kmsg");
+    const say = (t) => { if (km) km.textContent = t; };
+    const stepsBox = $("s-steps");
+    if (stepsBox) stepsBox.innerHTML = "";
+    const skIn = $("s-key");
+    const raw = skIn ? skIn.value : "";
     const k = raw.trim() || store.keys().gemini;
     steps("1. Button works — starting test…");
     await new Promise(r => setTimeout(r, 50));
     steps(`2. Key seen: ${k ? `yes (${cleanKey(k).length} chars)` : "NO — empty box and none saved"}`);
-    $("s-kmsg").textContent = "Checking...";
+    say("Checking...");
     try {
       steps("3. Contacting Google…");
       await testGeminiKey(k, (s) => steps(s));
       store.saveKeys({ gemini: cleanKey(k) });
-      $("s-kmsg").textContent = "✓ Key works and is saved.";
+      say("✓ Key works and is saved.");
       steps("4. Done — success.");
     }
     catch (e) {
-      $("s-kmsg").innerHTML = `✗ ${e.message} <button class="btn ghost" id="s-dbg" style="padding:4px 10px;font-size:12px">Copy debug</button>`;
+      if (km) km.innerHTML = `✗ ${e.message} <button class="btn ghost" id="s-dbg" style="padding:4px 10px;font-size:12px">Copy debug</button>`;
       steps("4. Failed: " + e.message);
       const d = $("s-dbg");
       if (d) d.onclick = async () => {
-        const info = `Gemini key test failed\nTime: ${new Date().toISOString()}\nPage: ${location.href}\nSteps:\n${$("s-steps").innerText}\nError: ${e.message}\nDebug: ${e.debug || "n/a"}\nUA: ${navigator.userAgent}`;
+        const sb = $("s-steps");
+        const info = `Gemini key test failed\nTime: ${new Date().toISOString()}\nPage: ${location.href}\nSteps:\n${sb ? sb.innerText : "n/a"}\nError: ${e.message}\nDebug: ${e.debug || "n/a"}\nUA: ${navigator.userAgent}`;
         try { await navigator.clipboard.writeText(info); d.textContent = "✓ Copied — send this"; }
         catch { prompt("Copy the debug info:", info); }
       };
     }
     finally { btn.disabled = false; }
   };
-  $("s-del").onclick = () => { store.saveKeys({ gemini: "" }); $("s-key").value = ""; $("s-key").placeholder = "AIza…"; $("s-kmsg").textContent = "Removed."; };
+  const delBtn = $("s-del");
+  if (delBtn) delBtn.onclick = () => { store.saveKeys({ gemini: "" }); setV("s-key", ""); const sk2 = $("s-key"); if (sk2) sk2.placeholder = "AIza…"; const km2 = $("s-kmsg"); if (km2) km2.textContent = "Removed."; };
 }

@@ -12,14 +12,34 @@ function errOf(r, j, fb, extra) {
   e.status = r.status; e.requestId = j.requestId; e.extra = extra;
   return e;
 }
-export async function apiHealth() {
-  const r = await fetch(`${API}/api/health`);
-  return r.json();
+// fetch with timeout so "Loading..." can never stick forever on a hanging network.
+async function fetchT(url, opts = {}, ms = 8000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
 }
+export async function apiHealth() {
+  try {
+    const r = await fetchT(`${API}/api/health`);
+    return r.json();
+  } catch {
+    return null;
+  }
+}
+// Never rejects: returns LOCAL_AI fallback when backend is unreachable.
 export async function apiModels() {
-  const r = await fetch(`${API}/api/models`);
-  if (!r.ok) return { models: [], defaultModel: "" };
-  return r.json();
+  try {
+    const r = await fetchT(`${API}/api/models`);
+    if (!r.ok) return LOCAL_AI;
+    const j = await r.json();
+    return j.providers ? j : LOCAL_AI;
+  } catch {
+    return LOCAL_AI;
+  }
 }
 export async function apiRegenerate(payload) {
   const r = await fetch(`${API}/api/regenerate-question`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
