@@ -27,7 +27,8 @@ export function renderCreate(el, ctx) {
     <div><label>AI Provider</label><select id="f-provider"><option>Loading...</option></select></div>
     <div><label>AI Model</label><select id="f-model"><option>Loading...</option></select></div>
   </div>
-  <div style="margin-top:14px"><button class="btn" id="f-go">🚀 Generate Quiz</button> <span id="f-msg" class="mut"></span></div></div></div></div>
+  <div style="margin-top:14px"><button class="btn" id="f-go">🚀 Generate Quiz</button> <span id="f-msg" class="mut"></span></div>
+  <div id="f-progwrap" style="display:none;margin-top:10px"><div class="prog"><i id="f-bar" style="width:0%"></i></div><div class="mut" id="f-pct" style="margin-top:4px">0%</div></div></div></div></div>
   <div id="f-err"></div>`;
 
   const $ = (id) => el.querySelector(id.startsWith("#") ? id : "#" + id);
@@ -144,11 +145,36 @@ export function renderCreate(el, ctx) {
       }
     };
     renderMsg();
+    const wrap = $("f-progwrap"), bar = $("f-bar"), pct = $("f-pct");
+    const setPct = (p, label) => {
+      if (!alive()) return;
+      if (wrap) wrap.style.display = "block";
+      if (bar) bar.style.width = Math.max(0, Math.min(100, p)) + "%";
+      if (pct) pct.textContent = `${Math.round(p)}%${label ? " · " + label : ""}`;
+    };
+    const hideBar = () => { if (wrap) wrap.style.display = "none"; };
+    setPct(2, "starting…");
+    let lastPct = 2, tries = 0;
     const iv = setInterval(() => { tick++; if (tick % 2 === 0) li = (li + 1) % LOADS.length; renderMsg(); }, 1000);
-    const stopIv = () => clearInterval(iv);
+    let creep = 0;
+    const ivCreep = setInterval(() => {
+      if (!backendUp) return;
+      creep = Math.min(90, creep + 3);
+      setPct(creep, "AI working…");
+    }, 1500);
+    const stopIv = () => { clearInterval(iv); clearInterval(ivCreep); };
     if (btn) btn.innerHTML = `<span class="spin"></span> Generating...`;
     const doneBtn = () => { busy = false; if (btn) { btn.disabled = false; btn.textContent = "🚀 Generate Quiz"; } };
-    const onEvent = (e) => { if (e && e.t === "wait") { waitUntil = Date.now() + e.ms; waitWhy = e.why || ""; renderMsg(); } };
+    const onEvent = (e) => {
+      if (!e) return;
+      if (e.t === "wait") { waitUntil = Date.now() + e.ms; waitWhy = e.why || ""; renderMsg(); }
+      if (e.t === "attempt") tries++;
+      if (e.t === "progress" && e.total) {
+        const p = Math.max(lastPct, (e.done / e.total) * 100);
+        lastPct = p;
+        setPct(p, `part ${Math.floor(e.done)}/${e.total}${tries ? ` · try ${tries + 1}` : ""}`);
+      }
+    };
     try {
       let quiz;
       if (backendUp) {
@@ -158,7 +184,7 @@ export function renderCreate(el, ctx) {
       } else {
         const prov = payload.provider === "groq" ? "groq" : "gemini";
         const key = offlineKeyFor(prov);
-        if (!key) { stopIv(); showNoKey(target); doneBtn(); return; }
+        if (!key) { stopIv(); hideBar(); showNoKey(target); doneBtn(); return; }
         const model = offlineModelFor(prov, payload.model);
         const q = await generateQuizDirect({ ...payload, provider: prov }, key, model, prov, onEvent);
         stopIv();
@@ -168,6 +194,7 @@ export function renderCreate(el, ctx) {
       location.hash = `#/quiz/${quiz.id}`;
     } catch (e) {
       stopIv();
+      hideBar();
       showGenError(target, payload, e);
       doneBtn();
     }

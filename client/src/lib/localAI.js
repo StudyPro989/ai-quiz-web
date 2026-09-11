@@ -418,12 +418,15 @@ export async function generateQuizDirect(cfg, key, model, provider = "gemini", o
     const raw = await directCall(provider, buildPromptLocal(bcfg, null, exclude), key, model);
     return validateLocal(raw, bcfg);
   };
-  for (const n of parts) {
-    const chunkCfg = { ...cfg, questionCount: n };
+  for (let pi = 0; pi < parts.length; pi++) {
+    const n = parts[pi];
+    say({ t: "progress", done: pi, total: parts.length });
     let batch = [];
     let lastErr = "unknown error";
-    for (const wait of [0, 5000, 12000]) {
-      await nap(wait, "retry");
+    const tries = [0, 5000, 12000];
+    for (let ai = 0; ai < tries.length; ai++) {
+      await nap(tries[ai], "retry");
+      say({ t: "progress", done: pi + (ai / tries.length) * 0.9, total: parts.length });
       try {
         say({ t: "attempt" });
         const r = await fetchBatch(n, []);
@@ -455,6 +458,7 @@ export async function generateQuizDirect(cfg, key, model, provider = "gemini", o
     }
     if (batch.length !== n) throw new Error(lastErr);
     questions = questions.concat(batch.slice(0, n));
+    say({ t: "progress", done: pi + 1, total: parts.length });
   }
   questions.forEach((q, i) => q.id = `q${i + 1}`);
   return { title: `Class ${cfg.class} ${cfg.subject} - ${cfg.topic}`, class: cfg.class, subject: cfg.subject, medium: cfg.medium, topic: cfg.topic, difficulty: cfg.difficulty, questionTypes: cfg.questionTypes, questions, createdAt: new Date().toISOString(), direct: true, provider };
