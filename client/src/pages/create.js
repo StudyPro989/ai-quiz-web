@@ -1,6 +1,6 @@
 import { CLASSES, MEDIUMS, DIFFICULTIES, COUNTS, QUESTION_TYPES, SUBJECTS_BY_CLASS, SUB_SUBJECTS, chaptersFor } from "../data/curriculum.js";
 import { apiGenerate, apiModels, apiHealth, LOCAL_AI } from "../lib/api.js";
-import { generateQuizDirect, effKey } from "../lib/localAI.js";
+import { generateQuizDirect, effKey, offlineOptions, offlineKeyFor, offlineModelFor } from "../lib/localAI.js";
 import { store, uid } from "../lib/store.js";
 
 const LOADS = ["Preparing your quiz...", "Generating questions...", "Preparing answers...", "Checking generated questions...", "Almost ready..."];
@@ -60,12 +60,28 @@ export function renderCreate(el, ctx) {
   if (d.class) { setV("f-class", d.class); syncSub(); if (d.subject) { setV("f-sub", d.subject); syncCh(); } }
   else { syncSub(); }
   let backendUp = false;
-  setH("f-provider", LOCAL_AI.providers.map(p => `<option>${p}</option>`).join(""));
-  setH("f-model", LOCAL_AI.models.map(x => `<option>${x}</option>`).join(""));
+  const paintOfflineLists = () => {
+    const o = offlineOptions();
+    if (!o.providers.length) {
+      setH("f-provider", `<option value="">Add key in Settings…</option>`);
+      setH("f-model", `<option value="">—</option>`);
+      return;
+    }
+    setH("f-provider", o.providers.map(p => `<option>${p}</option>`).join(""));
+    const syncM = () => {
+      const p = getV("f-provider") || o.providers[0];
+      setH("f-model", (o.modelsByProvider[p] || []).map(x => `<option>${x}</option>`).join(""));
+    };
+    const fp = $("f-provider");
+    if (fp) fp.onchange = syncM;
+    syncM();
+  };
+  const fillLocal = paintOfflineLists; // instant first paint — never wait on network
+  fillLocal();
   paintConn();
   apiModels().then(m => {
     if (!alive()) return;
-    if (!m) { paintConn(); return; } // no backend — LOCAL_AI options already painted
+    if (!m) { paintConn(); return; } // no backend — offline options already painted
     backendUp = true;
     const provs = m.providers?.length ? m.providers : ["groq"];
     const byProv = m.modelsByProvider || {};
@@ -86,16 +102,14 @@ export function renderCreate(el, ctx) {
     paintConn();
   }).catch(() => {
     if (!alive()) return;
-    const m = LOCAL_AI;
-    setH("f-provider", m.providers.map(p => `<option>${p}</option>`).join(""));
-    const list = m.modelsByProvider.gemini;
-    setH("f-model", list.map(x => `<option>${x}</option>`).join(""));
+    paintOfflineLists();
     paintConn();
   });
   function paintConn() {
-    const hasKey = !!effKey(store.keys().gemini);
+    const o = offlineOptions();
+    const hasKey = o.providers.length > 0;
     if (backendUp || hasKey) {
-      $("#f-conn").innerHTML = backendUp ? "" : `<div class="card" style="border:1.5px solid #a7e3c0;background:#f0fdf4"><b>🔑 Backend-free mode.</b><p class=mut style="margin:6px 0 0">No server found — generating with your saved browser key (Gemini, direct). Everything stays on this page.</p></div>`;
+      $("#f-conn").innerHTML = backendUp ? "" : `<div class="card" style="border:1.5px solid #a7e3c0;background:#f0fdf4"><b>🔑 Backend-free mode.</b><p class=mut style="margin:6px 0 0">No server found — generating with your saved browser key, direct. Everything stays on this page.</p></div>`;
       return;
     }
     $("#f-conn").innerHTML = "";
@@ -128,12 +142,13 @@ export function renderCreate(el, ctx) {
         clearInterval(iv);
         quiz = { ...j.quiz, id: uid(), config: payload };
       } else {
-        const key = effKey(store.keys().gemini);
+        const prov = payload.provider === "groq" ? "groq" : "gemini";
+        const key = offlineKeyFor(prov);
         if (!key) { clearInterval(iv); showNoKey(target); doneBtn(); return; }
-        const model = payload.provider === "gemini" ? payload.model : "gemini-2.5-flash";
-        const q = await generateQuizDirect({ ...payload, provider: "gemini" }, key, model);
+        const model = offlineModelFor(prov, payload.model);
+        const q = await generateQuizDirect({ ...payload, provider: prov }, key, model, prov);
         clearInterval(iv);
-        quiz = { ...q, id: uid(), config: { ...payload, provider: "gemini", model } };
+        quiz = { ...q, id: uid(), config: { ...payload, provider: prov, model } };
       }
       store.saveQuiz(quiz);
       location.hash = `#/quiz/${quiz.id}`;
@@ -144,7 +159,7 @@ export function renderCreate(el, ctx) {
     }
   };
   function showNoKey(target) {
-    setH("f-err", `<div class="card" style="border:1.5px solid #facc15;background:#fffbeb"><h3>🔑 Add your Gemini key to generate here</h3>
+    setH("f-err", `<div class="card" style="border:1.5px solid #facc15;background:#fffbeb"><h3>🔑 Add an AI key to generate here</h3>
       <p><b>Tried:</b> ${target}</p>
       <p class=mut>This published link has no backend, so it generates straight from your browser. Paste a free key once in Settings (kept only on this device) and generate again.</p>
       <div style="margin-top:10px"><a class="btn" href="#/settings">Open Settings → add key</a></div></div>`);

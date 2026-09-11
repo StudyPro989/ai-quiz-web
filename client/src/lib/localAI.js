@@ -1,5 +1,6 @@
 // Pages-native mode: prompt + validate + call Gemini straight from the browser.
 // NOTE: keep in sync with server/services/{prompt,validate,gemini}.js
+import { store } from "./store.js";
 const CLASS_GUIDE = {
   "6": "age ~11, Upper Primary. Use very simple language, basic definitions, everyday examples. Only NCERT Class 6 syllabus depth.",
   "7": "age ~12, Upper Primary. Simple language, foundational concepts with small extensions. Only NCERT Class 7 syllabus depth.",
@@ -135,6 +136,26 @@ export const hasSiteKey = () => siteKey().length > 10;
 // Effective key: personal saved key wins, otherwise built-in site key.
 export const effKey = (saved) => cleanKey(saved) || siteKey();
 
+export const GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "openai/gpt-oss-safeguard-20b", "qwen/qwen3.6-27b", "qwen/qwen3.8-27b", "groq/compound", "groq/compound-mini", "allam-2-7b"];
+export const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"];
+export const modelsFor = (p) => p === "groq" ? GROQ_MODELS : GEMINI_MODELS;
+// Offline (backend-free) options based on saved keys. Empty providers = needs key.
+export function offlineOptions() {
+  const keys = store.keys();
+  const out = { providers: [], modelsByProvider: {} };
+  if (effKey(keys.gemini)) { out.providers.push("gemini"); out.modelsByProvider.gemini = GEMINI_MODELS; }
+  if (cleanKey(keys.groq)) { out.providers.push("groq"); out.modelsByProvider.groq = GROQ_MODELS; }
+  return out;
+}
+export function offlineKeyFor(provider) {
+  const keys = store.keys();
+  return provider === "groq" ? cleanKey(keys.groq) : effKey(keys.gemini);
+}
+export function offlineModelFor(provider, wanted) {
+  const list = modelsFor(provider);
+  return list.includes(wanted) ? wanted : list[0];
+}
+
 const GROOT = "https://generativelanguage.googleapis.com";
 // Header first, `?key=` fallback (avoids preflight/header-stripping issues).
 // first: "header" | "query" — GET checks use query-first (no preflight at all).
@@ -247,7 +268,64 @@ async function geminiCall(prompt, key, model) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-export async function generateQuizDirect(cfg, key, model) {
+const GQ = "https://api.groq.com/openai/v1";
+async function groqCall(prompt, key, model) {
+  key = cleanKey(key);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 90000);
+  try {
+    const r = await fetch(`${GQ}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+      body: JSON.stringify({ model, temperature: 0.5, max_tokens: 8000, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Return valid JSON only." }, { role: "user", content: prompt }] }),
+      signal: ctrl.signal
+    });
+    if (r.status === 429) throw new Error("Rate limit — please try again shortly.");
+    if (r.status === 401) throw new Error("Invalid Groq API key. Check Settings.");
+    if (r.status === 400) throw new Error("AI rejected the request (model name or quota).");
+    if (!r.ok) throw new Error(`AI provider error ${r.status}`);
+    const j = await r.json();
+    const text = j.choices?.[0]?.message?.content || "";
+    if (!text.trim()) throw new Error("Empty AI response");
+    return text;
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("AI request timed out. Please try again.");
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+export async function testGroqKey(key, say) {
+  const log = (t) => { try { say && say(t); } catch (_) {} };
+  key = cleanKey(key);
+  if (!key) throw new Error("Paste a key first.");
+  if (/^AIza/.test(key)) throw new Error("That's a Gemini key — this box needs a Groq key (starts with gsk_).");
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 25000);
+  try {
+    log("3a. Contacting Groq…");
+    const r = await fetch(`${GQ}/models`, { headers: { Authorization: "Bearer " + key }, signal: ctrl.signal });
+    log("3b. Groq answered (HTTP " + r.status + ")…");
+    if (r.status === 401) throw new Error("Invalid Groq API key.");
+    if (r.status === 429) throw new Error("Rate limited — try again in a minute.");
+    if (!r.ok) throw new Error(`Key check failed (HTTP ${r.status}).`);
+    return true;
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("Timed out — check your internet and retry.");
+    if (/fetch|network|load failed/i.test(e.message)) throw new Error("Network blocked — check internet / ad-blocker, then retry.");
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+const directCall = (provider, prompt, key, model) =>
+  provider === "groq" ? groqCall(prompt, key, model) : geminiCall(prompt, key, model);
+const directFatal = (provider) =>
+  provider === "groq" ? /Invalid Groq|rejected/i : /Invalid Gemini|rejected/i;
+
+export async function generateQuizDirect(cfg, key, model, provider = "gemini") {
   const parts = [];
   for (let done = 0; done < cfg.questionCount; done += 10) parts.push(Math.min(10, cfg.questionCount - done));
   let questions = [];
@@ -258,14 +336,14 @@ export async function generateQuizDirect(cfg, key, model) {
     for (const wait of [0, 6000, 15000]) {
       if (wait) await sleep(wait);
       try {
-        const raw = await geminiCall(buildPromptLocal(chunkCfg), key, model);
+        const raw = await directCall(provider, buildPromptLocal(chunkCfg), key, model);
         const { quiz, error } = validateLocal(raw, chunkCfg);
         if (!error) { got = quiz.questions; break; }
         lastErr = error;
         if (!/rate limit/i.test(error)) break;
       } catch (e) {
         lastErr = e.message || "AI request failed";
-        if (/Invalid Gemini|rejected/i.test(lastErr)) break;
+        if (directFatal(provider).test(lastErr)) break;
         if (!/Rate limit|timed out/i.test(lastErr)) break;
       }
     }
@@ -273,20 +351,20 @@ export async function generateQuizDirect(cfg, key, model) {
     questions = questions.concat(got);
   }
   questions.forEach((q, i) => q.id = `q${i + 1}`);
-  return { title: `Class ${cfg.class} ${cfg.subject} - ${cfg.topic}`, class: cfg.class, subject: cfg.subject, medium: cfg.medium, topic: cfg.topic, difficulty: cfg.difficulty, questionTypes: cfg.questionTypes, questions, createdAt: new Date().toISOString(), direct: true };
+  return { title: `Class ${cfg.class} ${cfg.subject} - ${cfg.topic}`, class: cfg.class, subject: cfg.subject, medium: cfg.medium, topic: cfg.topic, difficulty: cfg.difficulty, questionTypes: cfg.questionTypes, questions, createdAt: new Date().toISOString(), direct: true, provider };
 }
 
-export async function regenerateDirect(cfg, fix, key, model) {
+export async function regenerateDirect(cfg, fix, key, model, provider = "gemini") {
   let lastErr = "unknown error";
   for (let a = 0; a < 2; a++) {
     try {
-      const raw = await geminiCall(buildPromptLocal({ ...cfg, questionCount: 1, questionTypes: [fix.type] }, fix), key, model);
+      const raw = await directCall(provider, buildPromptLocal({ ...cfg, questionCount: 1, questionTypes: [fix.type] }, fix), key, model);
       const { quiz, error } = validateLocal(raw, { ...cfg, questionCount: 1, questionTypes: [fix.type] });
       if (!error && quiz.questions.length) return quiz.questions[0];
       lastErr = error || "empty result";
     } catch (e) {
       lastErr = e.message || "AI request failed";
-      if (/Invalid Gemini|rejected/i.test(lastErr)) break;
+      if (directFatal(provider).test(lastErr)) break;
     }
   }
   throw new Error(lastErr);

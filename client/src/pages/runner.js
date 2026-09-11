@@ -1,7 +1,7 @@
 import { store } from "../lib/store.js";
 import { apiRegenerate } from "../lib/api.js";
 import { checkQuestion, optText, esc, isCheckable } from "../components/questions.js";
-import { regenerateDirect, effKey } from "../lib/localAI.js";
+import { regenerateDirect, effKey, offlineKeyFor, offlineModelFor } from "../lib/localAI.js";
 
 const TYPE_LABEL = { mcq: "MCQ", true_false: "True / False", fill_blank: "Fill in the Blank", one_word: "One-Word", short_answer: "Short Answer", long_answer: "Long Answer", assertion_reason: "Assertion & Reason", match: "Match the Following", case_based: "Case-Based" };
 const REASONS = [["wrong_answer", "Answer is wrong"], ["bad_options", "Options are wrong / duplicated"], ["off_topic", "Not on my chapter"], ["unclear", "Question unclear"], ["wrong_level", "Too hard / easy for my class"], ["other", "Other"]];
@@ -152,14 +152,15 @@ export function renderRunner(el, id) {
         finishOk(nq);
       } catch (e) {
         const offline = e.status === 404 || e.status === 405 || /fetch|network|load failed/i.test(e.message || "");
-        const key = effKey(store.keys().gemini);
+        const prov = quiz.config?.provider === "groq" ? "groq" : "gemini";
+        const key = offlineKeyFor(prov);
         if (!offline || !key) { failShow(e); return; }
         try {
-          const model = (quiz.config?.provider === "gemini" ? quiz.config?.model : null) || "gemini-2.5-flash";
+          const model = offlineModelFor(prov, quiz.config?.provider === prov ? quiz.config?.model : undefined);
           const nq = await regenerateDirect(
             { class: quiz.class, subject: quiz.subject, medium: quiz.medium, topic: quiz.topic, difficulty: quiz.difficulty, questionTypes: [q.type] },
             { type: q.type, badQuestion: base.badQuestion, badOptions: base.badOptions, reason: base.reason, note: base.note },
-            key, model
+            key, model, prov
           );
           finishOk(nq);
         } catch (e2) { failShow(e2); }

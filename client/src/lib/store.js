@@ -15,7 +15,7 @@ export const store = {
   saveResult(r) { const all = read(K.results, []); all.unshift(r); write(K.results, all.slice(0, 200)); },
   settings: () => read(K.settings, { model: "", theme: "light", defaults: {} }),
   saveSettings(s) { write(K.settings, s); },
-  keys: () => read(K.keys, { gemini: "" }),
+  keys: () => read(K.keys, { gemini: "", groq: "" }),
   saveKeys(k) { write(K.keys, k); }
 };
 export const uid = () => "z" + Math.random().toString(36).slice(2, 9);
