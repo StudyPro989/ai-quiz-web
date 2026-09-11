@@ -22,7 +22,7 @@ const TYPE_GUIDE = {
   case_based: "Case-based: passage field + subQuestions array (each with question, answer, explanation). Top-level answer mirrors first sub-question summary."
 };
 
-export function buildPromptLocal(cfg, fix) {
+export function buildPromptLocal(cfg, fix, more = []) {
   const types = cfg.questionTypes.join(", ");
   const level = CLASS_GUIDE[cfg.class] || "Use the exact syllabus depth of the stated class.";
   const regen = fix ? `
@@ -32,6 +32,23 @@ ${fix.badOptions ? `- Its options were: ${fix.badOptions}` : ""}
 - Reported problem: ${fix.reason}${fix.note ? ` (student note: ${fix.note})` : ""}
 - Generate ONE fresh ${fix.type} question on "${cfg.topic}" that does NOT repeat this flaw: ensure exactly one unambiguously correct answer, correct option labelled correctly, and the question strictly on-topic at Class ${cfg.class} level.
 ` : "";
+  const moreTxt = more.length ? `
+ALREADY GENERATED (do NOT repeat these — generate DIFFERENT questions):
+${more.slice(0, 20).map((m, i) => `  ${i + 1}. ${String(m).slice(0, 200)}`).join("\n")}
+` : "";
+  const T = cfg.questionTypes;
+  const needOpts = T.some(t => ["mcq", "true_false", "assertion_reason"].includes(t));
+  const needAcc = T.some(t => ["fill_blank", "one_word"].includes(t));
+  const needMatch = T.includes("match");
+  const needCase = T.includes("case_based");
+  const needAssert = T.includes("assertion_reason");
+  if (cfg.compact) {
+    return `Generate a self-training quiz (NOT a timed exam), JSON ONLY, no markdown.
+Class ${cfg.class} (${level}) | Subject: ${cfg.subject} | Language: ${cfg.medium} | Topic: ${cfg.topic} | Difficulty (${cfg.difficulty} WITHIN Class ${cfg.class} level): ${cfg.difficulty} | Count: ${cfg.questionCount} | Types: ${types}.
+STRICT: every question on "${cfg.topic}" only; Class ${cfg.class} NCERT depth only, never higher-class concepts; language ${cfg.medium}.
+${regen}${moreTxt}Fields per question: id, type, question, answer, answerMode ("one_word" only if truly one word, else "explanation"), explanation.${needOpts ? " Options questions need options[{id,text}] + correctAnswer (option id)." : ""}${needAssert ? ' Assertion options: "Both A and R are true, and R correctly explains A." / "Both A and R are true, but R does not explain A." / "A is true but R is false." / "A is false but R is true."' : ""}${needAcc ? " fill/one_word add acceptableAnswers (lowercase)." : ""}${needMatch ? " match needs pairs[{left,right}] + answer mapping." : ""}${needCase ? " case_based needs passage + subQuestions[{question,answer,explanation}]." : ""}
+Shape: {"title":"...","class":"${cfg.class}","subject":"${cfg.subject}","medium":"${cfg.medium}","topic":"${cfg.topic}","difficulty":"${cfg.difficulty}","questions":[{"id":"q1","type":"${T[0]}","question":"...","answer":"...","answerMode":"one_word","explanation":"..."}]}`;
+  }
   return `You are a helpful Indian school curriculum quiz generator.
 Generate a self-training quiz (NOT a timed exam) for:
 Class: ${cfg.class}, Subject: ${cfg.subject}, Medium/language: ${cfg.medium}, Topic: ${cfg.topic}, Difficulty: ${cfg.difficulty}, Count: ${cfg.questionCount}, Types (mix evenly): ${types}.
@@ -50,7 +67,7 @@ CLASS-LEVEL CEILING (strict — never violate):
 - Distractors (wrong MCQ options) must be plausible at Class ${cfg.class} level, not absurdly advanced or trivially silly.
 - Case-study passages must be readable by a Class ${cfg.class} student.
 - When uncertain about syllabus boundaries, always choose the simpler, lower-class version. If the topic is normally taught in a higher class, introduce it from scratch AT Class ${cfg.class} level instead of importing the higher-class treatment.
-${regen}
+${regen}${moreTxt}
 Rules:
 - Content language MUST be in ${cfg.medium} (questions, options, answers, explanations, passages).
 - Distribute the ${cfg.questionCount} questions across the requested types.
@@ -69,10 +86,48 @@ Return JSON ONLY, no markdown, matching this shape:
 }
 
 const VALID = new Set(["mcq", "true_false", "fill_blank", "one_word", "short_answer", "long_answer", "assertion_reason", "match", "case_based"]);
+function balanced(s) {
+  const start = s.indexOf("{");
+  if (start < 0) return s;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; }
+    else if (c === '"') inStr = true;
+    else if (c === "{") depth++;
+    else if (c === "}") { depth--; if (!depth) return s.slice(start, i + 1); }
+  }
+  return s.slice(start);
+}
+function autoClose(s) {
+  const start = s.indexOf("{");
+  if (start < 0) return s;
+  let depthB = 0, depthA = 0, inStr = false, esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) { if (esc) esc = false; else if (c === "\\") esc = true; else if (c === '"') inStr = false; }
+    else if (c === '"') inStr = true;
+    else if (c === "{") depthB++;
+    else if (c === "}") depthB--;
+    else if (c === "[") depthA++;
+    else if (c === "]") depthA--;
+  }
+  return s.slice(start) + "}".repeat(Math.max(0, depthB)) + "]".repeat(Math.max(0, depthA));
+}
 function extractJson(raw) {
   const s0 = String(raw || "").trim().replace(/^```(json)?/i, "").replace(/```$/i, "").trim();
+  const tries = [s0];
   const a = s0.indexOf("{"), b = s0.lastIndexOf("}");
-  return JSON.parse(a >= 0 && b > a ? s0.slice(a, b + 1) : s0);
+  if (a >= 0 && b > a) tries.push(s0.slice(a, b + 1));
+  tries.push(balanced(s0));
+  tries.push(autoClose(s0));
+  for (const t of tries) {
+    try {
+      const d = JSON.parse(t);
+      if (d && Array.isArray(d.questions)) return d;
+    } catch { /* next */ }
+  }
+  throw new Error("bad json");
 }
 
 export function validateLocal(raw, cfg) {
@@ -80,7 +135,16 @@ export function validateLocal(raw, cfg) {
   try { d = extractJson(raw); }
   catch { return { error: "AI returned invalid JSON." }; }
   if (!d || !Array.isArray(d.questions)) return { error: "AI returned bad structure." };
-  if (d.questions.length !== cfg.questionCount) return { error: `AI returned ${d.questions.length} questions, expected ${cfg.questionCount}.` };
+  if (d.questions.length !== cfg.questionCount) {
+    const good = [];
+    for (const q of d.questions) {
+      try {
+        const one = validateLocal(JSON.stringify({ questions: [q] }), { ...cfg, questionCount: 1 });
+        if (!one.error) good.push(one.quiz.questions[0]);
+      } catch { /* skip bad one */ }
+    }
+    return { error: `AI returned ${d.questions.length} questions, expected ${cfg.questionCount}.`, partial: good };
+  }
   const ids = new Set();
   const kw = String(cfg.topic || "").toLowerCase().split(/[^a-z]+/).filter(w => w.length > 3);
   const skipTopicCheck = !kw.length || /^(general|basics?)$/i.test(cfg.topic || "") || (cfg.medium || "").toLowerCase() !== "english";
@@ -271,29 +335,41 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const GQ = "https://api.groq.com/openai/v1";
 async function groqCall(prompt, key, model) {
   key = cleanKey(key);
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 90000);
-  try {
-    const r = await fetch(`${GQ}/chat/completions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
-      body: JSON.stringify({ model, temperature: 0.5, max_tokens: 8000, response_format: { type: "json_object" }, messages: [{ role: "system", content: "Return valid JSON only." }, { role: "user", content: prompt }] }),
-      signal: ctrl.signal
-    });
-    if (r.status === 429) throw new Error("Rate limit — please try again shortly.");
-    if (r.status === 401) throw new Error("Invalid Groq API key. Check Settings.");
-    if (r.status === 400) throw new Error("AI rejected the request (model name or quota).");
-    if (!r.ok) throw new Error(`AI provider error ${r.status}`);
-    const j = await r.json();
-    const text = j.choices?.[0]?.message?.content || "";
-    if (!text.trim()) throw new Error("Empty AI response");
-    return text;
-  } catch (e) {
-    if (e.name === "AbortError") throw new Error("AI request timed out. Please try again.");
-    throw e;
-  } finally {
-    clearTimeout(t);
+  const variants = [
+    { json: true, max: 8000 },
+    { json: false, max: 8000 },
+    { json: false, max: 4000 }
+  ];
+  let lastErr = new Error(`AI rejected the request (${model}). Try another model like openai/gpt-oss-20b.`);
+  for (const v of variants) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 90000);
+    try {
+      const body = { model, temperature: 0.5, max_tokens: v.max, messages: [{ role: "system", content: "Return valid JSON only." }, { role: "user", content: prompt }] };
+      if (v.json) body.response_format = { type: "json_object" };
+      const r = await fetch(`${GQ}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+        body: JSON.stringify(body),
+        signal: ctrl.signal
+      });
+      if (r.status === 429) throw new Error("Rate limit — please try again shortly.");
+      if (r.status === 401) throw new Error("Invalid Groq API key. Check Settings.");
+      if (r.status === 400) { lastErr = new Error(`AI rejected the request (${model}). Try another model like openai/gpt-oss-20b.`); continue; }
+      if (!r.ok) throw new Error(`AI provider error ${r.status}`);
+      const j = await r.json();
+      const text = j.choices?.[0]?.message?.content || "";
+      if (!text.trim()) throw new Error("Empty AI response");
+      return text;
+    } catch (e) {
+      if (e.name === "AbortError") throw new Error("AI request timed out. Please try again.");
+      if (/Rate limit|Invalid Groq|provider error|Empty/.test(e.message)) throw e;
+      lastErr = e;
+    } finally {
+      clearTimeout(t);
+    }
   }
+  throw lastErr;
 }
 
 export async function testGroqKey(key, say) {
@@ -322,33 +398,60 @@ export async function testGroqKey(key, say) {
 
 const directCall = (provider, prompt, key, model) =>
   provider === "groq" ? groqCall(prompt, key, model) : geminiCall(prompt, key, model);
-const directFatal = (provider) =>
-  provider === "groq" ? /Invalid Groq|rejected/i : /Invalid Gemini|rejected/i;
+
+const FATAL_RE = /Invalid (Gemini|Groq)|rejected \(|AI_API_KEY|GEMINI_API_KEY/;
+const SMALL_MODEL_RE = /allam|safeguard|flash-lite|compound-mini|gpt-oss-20b|qwen/i;
+export const chunkFor = (model) => SMALL_MODEL_RE.test(model || "") ? 5 : 10;
 
 export async function generateQuizDirect(cfg, key, model, provider = "gemini") {
+  const per = chunkFor(model);
+  const small = per <= 5;
   const parts = [];
-  for (let done = 0; done < cfg.questionCount; done += 10) parts.push(Math.min(10, cfg.questionCount - done));
+  for (let done = 0; done < cfg.questionCount; done += per) parts.push(Math.min(per, cfg.questionCount - done));
   let questions = [];
+  const isFatal = (msg) => FATAL_RE.test(msg || "");
+  const isRetryable = (msg) => /Rate limit|timed out|invalid JSON|bad structure|drifted|Empty|Missing|Bad |Invalid question|must have|not in options|returned \d+ questions/i.test(msg || "");
+  const fetchBatch = async (need, exclude) => {
+    const bcfg = { ...cfg, questionCount: need, compact: small || undefined };
+    const raw = await directCall(provider, buildPromptLocal(bcfg, null, exclude), key, model);
+    return validateLocal(raw, bcfg);
+  };
   for (const n of parts) {
     const chunkCfg = { ...cfg, questionCount: n };
+    let batch = [];
     let lastErr = "unknown error";
-    let got = null;
-    for (const wait of [0, 6000, 15000]) {
+    for (const wait of [0, 5000, 12000]) {
       if (wait) await sleep(wait);
       try {
-        const raw = await directCall(provider, buildPromptLocal(chunkCfg), key, model);
-        const { quiz, error } = validateLocal(raw, chunkCfg);
-        if (!error) { got = quiz.questions; break; }
-        lastErr = error;
-        if (!/rate limit/i.test(error)) break;
+        const r = await fetchBatch(n, []);
+        if (!r.error) { batch = r.quiz.questions; break; }
+        lastErr = r.error;
+        if (isFatal(lastErr)) break;
+        if (/Rate limit/i.test(lastErr)) { await sleep(45000); continue; }
+        if (r.partial?.length) { batch = r.partial.slice(); break; }
       } catch (e) {
         lastErr = e.message || "AI request failed";
-        if (directFatal(provider).test(lastErr)) break;
-        if (!/Rate limit|timed out/i.test(lastErr)) break;
+        if (isFatal(lastErr)) break;
+        if (/Rate limit/i.test(lastErr)) { await sleep(45000); continue; }
+        if (!isRetryable(lastErr)) break;
       }
     }
-    if (!got) throw new Error(lastErr);
-    questions = questions.concat(got);
+    for (let t = 0; t < 2 && batch.length > 0 && batch.length < n; t++) {
+      const need = n - batch.length;
+      await sleep(3000);
+      try {
+        const r = await fetchBatch(need, batch.map(q => q.question));
+        if (!r.error) { batch = batch.concat(r.quiz.questions); break; }
+        lastErr = r.error;
+        if (r.partial?.length) batch = batch.concat(r.partial);
+        if (isFatal(lastErr)) break;
+      } catch (e) {
+        lastErr = e.message || "AI request failed";
+        if (isFatal(lastErr)) break;
+      }
+    }
+    if (batch.length !== n) throw new Error(lastErr);
+    questions = questions.concat(batch.slice(0, n));
   }
   questions.forEach((q, i) => q.id = `q${i + 1}`);
   return { title: `Class ${cfg.class} ${cfg.subject} - ${cfg.topic}`, class: cfg.class, subject: cfg.subject, medium: cfg.medium, topic: cfg.topic, difficulty: cfg.difficulty, questionTypes: cfg.questionTypes, questions, createdAt: new Date().toISOString(), direct: true, provider };
@@ -364,7 +467,7 @@ export async function regenerateDirect(cfg, fix, key, model, provider = "gemini"
       lastErr = error || "empty result";
     } catch (e) {
       lastErr = e.message || "AI request failed";
-      if (directFatal(provider).test(lastErr)) break;
+      if (FATAL_RE.test(lastErr)) break;
     }
   }
   throw new Error(lastErr);

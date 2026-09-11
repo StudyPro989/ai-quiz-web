@@ -76,29 +76,53 @@ app.post("/api/generate-quiz", async (req, res) => {
     }
 
     const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    const FATAL_RE = /Invalid (Groq|Gemini)|rejected \(|AI_API_KEY|GEMINI_API_KEY|401|invalid.*key/i;
+    const RETRY_RE = /timed out|provider error 5|invalid JSON|bad structure|drifted|Empty|Missing|Bad |Invalid question|must have|not in options|returned \d+ questions/i;
     async function genChunk(count) {
-      const chunkCfg = { ...cfg, questionCount: count };
-      const waits = [0, 12000, 30000];
+      const small = /allam|safeguard|flash-lite|compound-mini|gpt-oss-20b|qwen/i.test(chosenModel);
+      const chunkCfg = { ...cfg, questionCount: count, compact: small || undefined };
+      const isFatal = (msg) => FATAL_RE.test(msg || "");
+      const fetchBatch = async (need, exclude) => {
+        const raw = await generate(buildPrompt({ ...chunkCfg, questionCount: need }, null, exclude), provider, chosenModel);
+        return validateQuiz(raw, { ...chunkCfg, questionCount: need });
+      };
+      let batch = [];
       let lastErr = "unknown error";
-      for (let a = 0; a < waits.length; a++) {
-        if (waits[a]) await sleep(waits[a]);
+      for (const wait of [0, 8000, 20000]) {
+        if (wait) await sleep(wait);
         try {
-          const raw = await generate(buildPrompt(chunkCfg), provider, chosenModel);
-          const { quiz, error } = validateQuiz(raw, chunkCfg);
-          if (!error) return quiz.questions;
-          lastErr = error;
-          if (/rate limit/i.test(error)) continue;
-          if (a >= 1) break;
+          const r = await fetchBatch(count, []);
+          if (!r.error) { batch = r.quiz.questions; break; }
+          lastErr = r.error;
+          if (isFatal(lastErr)) break;
+          if (/Rate limit/i.test(lastErr)) { await sleep(45000); continue; }
+          if (r.partial?.length) { batch = r.partial.slice(); break; }
         } catch (e) {
           lastErr = e.message || "AI request failed";
-          if (/401|invalid.*key/i.test(lastErr)) break;
-          if (!/rate limit|timed out|provider error 5/i.test(lastErr)) { if (a >= 1) break; }
+          if (isFatal(lastErr)) break;
+          if (/Rate limit/i.test(lastErr)) { await sleep(45000); continue; }
+          if (!RETRY_RE.test(lastErr)) break;
         }
       }
-      throw new Error(lastErr);
+      for (let t = 0; t < 2 && batch.length > 0 && batch.length < count; t++) {
+        const need = count - batch.length;
+        await sleep(3000);
+        try {
+          const r = await fetchBatch(need, batch.map(q => q.question));
+          if (!r.error) { batch = batch.concat(r.quiz.questions); break; }
+          lastErr = r.error;
+          if (r.partial?.length) batch = batch.concat(r.partial);
+          if (isFatal(lastErr)) break;
+        } catch (e) {
+          lastErr = e.message || "AI request failed";
+          if (isFatal(lastErr)) break;
+        }
+      }
+      if (batch.length !== count) throw new Error(lastErr);
+      return batch.slice(0, count);
     }
     try {
-      const CHUNK = 10;
+      const CHUNK = /allam|safeguard|flash-lite|compound-mini|gpt-oss-20b|qwen/i.test(chosenModel) ? 5 : 10;
       const parts = [];
       for (let done = 0; done < count; done += CHUNK) parts.push(Math.min(CHUNK, count - done));
       let questions = [];

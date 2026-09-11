@@ -20,7 +20,7 @@ const CLASS_GUIDE = {
   "12": "age ~17-18, Senior Secondary board + CUET/NEET/JEE-foundation level at most. NCERT Class 12 depth, no UG-level content."
 };
 
-export function buildPrompt(cfg, fix) {
+export function buildPrompt(cfg, fix, more = []) {
   const types = cfg.questionTypes.join(", ");
   const level = CLASS_GUIDE[cfg.class] || "Use the exact syllabus depth of the stated class.";
   const regen = fix ? `
@@ -30,6 +30,23 @@ ${fix.badOptions ? `- Its options were: ${fix.badOptions}` : ""}
 - Reported problem: ${fix.reason}${fix.note ? ` (student note: ${fix.note})` : ""}
 - Generate ONE fresh ${fix.type} question on "${cfg.topic}" that does NOT repeat this flaw: ensure exactly one unambiguously correct answer, correct option labelled correctly, and the question strictly on-topic at Class ${cfg.class} level.
 ` : "";
+  const moreTxt = more.length ? `
+ALREADY GENERATED (do NOT repeat these — generate DIFFERENT questions):
+${more.slice(0, 20).map((m, i) => `  ${i + 1}. ${String(m).slice(0, 200)}`).join("\n")}
+` : "";
+  const T = cfg.questionTypes;
+  const needOpts = T.some(t => ["mcq", "true_false", "assertion_reason"].includes(t));
+  const needAcc = T.some(t => ["fill_blank", "one_word"].includes(t));
+  const needMatch = T.includes("match");
+  const needCase = T.includes("case_based");
+  const needAssert = T.includes("assertion_reason");
+  if (cfg.compact) {
+    return `Generate a self-training quiz (NOT a timed exam), JSON ONLY, no markdown.
+Class ${cfg.class} (${level}) | Subject: ${cfg.subject} | Language: ${cfg.medium} | Topic: ${cfg.topic} | Difficulty (${cfg.difficulty} WITHIN Class ${cfg.class} level): ${cfg.difficulty} | Count: ${cfg.questionCount} | Types: ${types}.
+STRICT: every question on "${cfg.topic}" only; Class ${cfg.class} NCERT depth only, never higher-class concepts; language ${cfg.medium}.
+${regen}${moreTxt}Fields per question: id, type, question, answer, answerMode ("one_word" only if truly one word, else "explanation"), explanation.${needOpts ? " Options questions need options[{id,text}] + correctAnswer (option id)." : ""}${needAssert ? ' Assertion options: "Both A and R are true, and R correctly explains A." / "Both A and R are true, but R does not explain A." / "A is true but R is false." / "A is false but R is true."' : ""}${needAcc ? " fill/one_word add acceptableAnswers (lowercase)." : ""}${needMatch ? " match needs pairs[{left,right}] + answer mapping." : ""}${needCase ? " case_based needs passage + subQuestions[{question,answer,explanation}]." : ""}
+Shape: {"title":"...","class":"${cfg.class}","subject":"${cfg.subject}","medium":"${cfg.medium}","topic":"${cfg.topic}","difficulty":"${cfg.difficulty}","questions":[{"id":"q1","type":"${T[0]}","question":"...","answer":"...","answerMode":"one_word","explanation":"..."}]}`;
+  }
   return `You are a helpful Indian school curriculum quiz generator.
 Generate a self-training quiz (NOT a timed exam) for:
 Class: ${cfg.class}, Subject: ${cfg.subject}, Medium/language: ${cfg.medium}, Topic: ${cfg.topic}, Difficulty: ${cfg.difficulty}, Count: ${cfg.questionCount}, Types (mix evenly): ${types}.
@@ -38,6 +55,7 @@ STRICT TOPIC (never violate):
 - EVERY question must be about the topic "${cfg.topic}" within ${cfg.subject}. Questions from any other chapter or topic are WRONG.
 - Do not drift to neighbouring chapters even if they seem related. Stay on "${cfg.topic}" for all ${cfg.questionCount} questions.
 - For case-based questions, the passage AND all sub-questions must be on "${cfg.topic}".
+${regen}${moreTxt}
 
 CLASS-LEVEL CEILING (strict — never violate):
 - Target learner: Class ${cfg.class} (${level})
@@ -48,7 +66,7 @@ CLASS-LEVEL CEILING (strict — never violate):
 - Distractors (wrong MCQ options) must be plausible at Class ${cfg.class} level, not absurdly advanced or trivially silly.
 - Case-study passages must be readable by a Class ${cfg.class} student.
 - When uncertain about syllabus boundaries, always choose the simpler, lower-class version. If the topic is normally taught in a higher class, introduce it from scratch AT Class ${cfg.class} level instead of importing the higher-class treatment.
-${regen}
+${moreTxt}
 
 Rules:
 - Content language MUST be in ${cfg.medium} (questions, options, answers, explanations, passages).
