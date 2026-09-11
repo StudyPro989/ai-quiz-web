@@ -35,6 +35,7 @@ export function renderSettings(el) {
   fillLocal(); // instant first paint — never wait on network
   apiModels().then(m => {
     if (!alive()) return;
+    m = m || LOCAL_AI;
     const provs = m.providers?.length ? m.providers : ["groq"];
     const byProv = m.modelsByProvider || {};
     const curProv = provs.includes(s.provider) ? s.provider : (m.defaultProvider || provs[0]);

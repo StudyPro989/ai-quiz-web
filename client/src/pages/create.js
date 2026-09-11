@@ -35,7 +35,6 @@ export function renderCreate(el, ctx) {
   const setH = (id, h) => { const n = $(id); if (n) n.innerHTML = h; };
   const setV = (id, v) => { const n = $(id); if (n) n.value = v; };
   const getV = (id) => { const n = $(id); return n ? n.value : ""; };
-  apiHealth().then(h => { if (!alive()) return; if (!h || h.ok !== true) throw 0; backendUp = true; paintConn(); }).catch(() => { if (alive()) paintConn(); });
   const selTypes = new Set();
   el.querySelectorAll(".chip").forEach(ch => ch.onclick = () => { const t = ch.dataset.t; selTypes.has(t) ? selTypes.delete(t) : selTypes.add(t); ch.classList.toggle("on"); });
   const syncSub = () => {
@@ -66,6 +65,7 @@ export function renderCreate(el, ctx) {
   paintConn();
   apiModels().then(m => {
     if (!alive()) return;
+    if (!m) { paintConn(); return; } // no backend — LOCAL_AI options already painted
     backendUp = true;
     const provs = m.providers?.length ? m.providers : ["groq"];
     const byProv = m.modelsByProvider || {};

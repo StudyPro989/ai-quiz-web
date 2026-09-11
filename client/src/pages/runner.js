@@ -151,7 +151,7 @@ export function renderRunner(el, id) {
         const nq = await apiRegenerate({ ...base, provider: quiz.config?.provider || store.settings().provider || undefined, model: store.settings().model || undefined });
         finishOk(nq);
       } catch (e) {
-        const offline = e.status === 404 || /fetch|network|load failed/i.test(e.message || "");
+        const offline = e.status === 404 || e.status === 405 || /fetch|network|load failed/i.test(e.message || "");
         const key = effKey(store.keys().gemini);
         if (!offline || !key) { failShow(e); return; }
         try {

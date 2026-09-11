@@ -30,15 +30,16 @@ export async function apiHealth() {
     return null;
   }
 }
-// Never rejects: returns LOCAL_AI fallback when backend is unreachable.
+// Returns server list, or NULL when no backend is reachable (never rejects).
+// Callers must fall back to LOCAL_AI explicitly so backendUp stays accurate.
 export async function apiModels() {
   try {
     const r = await fetchT(`${API}/api/models`);
-    if (!r.ok) return LOCAL_AI;
+    if (!r.ok) return null;
     const j = await r.json();
-    return j.providers ? j : LOCAL_AI;
+    return j.providers ? j : null;
   } catch {
-    return LOCAL_AI;
+    return null;
   }
 }
 export async function apiRegenerate(payload) {
