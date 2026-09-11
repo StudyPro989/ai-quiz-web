@@ -1,6 +1,6 @@
 import { CLASSES, MEDIUMS, DIFFICULTIES, COUNTS, QUESTION_TYPES, SUBJECTS_BY_CLASS, SUB_SUBJECTS, chaptersFor } from "../data/curriculum.js";
 import { apiGenerate, apiModels, apiHealth, LOCAL_AI } from "../lib/api.js";
-import { generateQuizDirect } from "../lib/localAI.js";
+import { generateQuizDirect, effKey } from "../lib/localAI.js";
 import { store, uid } from "../lib/store.js";
 
 const LOADS = ["Preparing your quiz...", "Generating questions...", "Preparing answers...", "Checking generated questions...", "Almost ready..."];
@@ -30,7 +30,7 @@ export function renderCreate(el, ctx) {
   <div style="margin-top:14px"><button class="btn" id="f-go">🚀 Generate Quiz</button> <span id="f-msg" class="mut"></span></div></div></div></div>
   <div id="f-err"></div>`;
 
-  const $ = (id) => el.querySelector(id);
+  const $ = (id) => el.querySelector("#" + id);
   const alive = () => el.isConnected;
   const setH = (id, h) => { const n = $(id); if (n) n.innerHTML = h; };
   const setV = (id, v) => { const n = $(id); if (n) n.value = v; };
@@ -61,6 +61,9 @@ export function renderCreate(el, ctx) {
   if (d.class) { setV("f-class", d.class); syncSub(); if (d.subject) { setV("f-sub", d.subject); syncCh(); } }
   else { syncSub(); }
   let backendUp = false;
+  setH("f-provider", LOCAL_AI.providers.map(p => `<option>${p}</option>`).join(""));
+  setH("f-model", LOCAL_AI.models.map(x => `<option>${x}</option>`).join(""));
+  paintConn();
   apiModels().then(m => {
     if (!alive()) return;
     backendUp = true;
@@ -68,7 +71,7 @@ export function renderCreate(el, ctx) {
     const byProv = m.modelsByProvider || {};
     const preProv = ctx?.prefill?.provider;
     const curProv = provs.includes(preProv) ? preProv : (provs.includes(s.provider) ? s.provider : (m.defaultProvider || provs[0]));
-    $("#f-provider").innerHTML = provs.map(p => `<option ${p === curProv ? "selected" : ""}>${p}</option>`).join("");
+    setH("f-provider", provs.map(p => `<option ${p === curProv ? "selected" : ""}>${p}</option>`).join(""));
     const fill = () => {
       if (!alive()) return;
       const p = getV("f-provider");
@@ -90,7 +93,7 @@ export function renderCreate(el, ctx) {
     paintConn();
   });
   function paintConn() {
-    const hasKey = !!store.keys().gemini;
+    const hasKey = !!effKey(store.keys().gemini);
     if (backendUp || hasKey) {
       $("#f-conn").innerHTML = backendUp ? "" : `<div class="card" style="border:1.5px solid #a7e3c0;background:#f0fdf4"><b>🔑 Backend-free mode.</b><p class=mut style="margin:6px 0 0">No server found — generating with your saved browser key (Gemini, direct). Everything stays on this page.</p></div>`;
       return;
@@ -125,7 +128,7 @@ export function renderCreate(el, ctx) {
         clearInterval(iv);
         quiz = { ...j.quiz, id: uid(), config: payload };
       } else {
-        const key = store.keys().gemini;
+        const key = effKey(store.keys().gemini);
         if (!key) { clearInterval(iv); showNoKey(target); doneBtn(); return; }
         const model = payload.provider === "gemini" ? payload.model : "gemini-2.5-flash";
         const q = await generateQuizDirect({ ...payload, provider: "gemini" }, key, model);

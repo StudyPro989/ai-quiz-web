@@ -128,6 +128,13 @@ export function validateLocal(raw, cfg) {
 // Gemini keys have no whitespace — strip it all (catches broken pastes).
 export const cleanKey = (k) => String(k || "").replace(/[\s'"]+/g, "");
 
+// Site key baked at build time from repo secret VITE_GEMINI_KEY (never in git).
+// Restrict it to your domain in Google AI Studio. A saved personal key overrides it.
+export const siteKey = () => cleanKey(import.meta.env.VITE_GEMINI_KEY || "");
+export const hasSiteKey = () => siteKey().length > 10;
+// Effective key: personal saved key wins, otherwise built-in site key.
+export const effKey = (saved) => cleanKey(saved) || siteKey();
+
 const GROOT = "https://generativelanguage.googleapis.com";
 // Header first, `?key=` fallback (avoids preflight/header-stripping issues).
 // first: "header" | "query" — GET checks use query-first (no preflight at all).

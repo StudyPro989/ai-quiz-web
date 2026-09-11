@@ -1,6 +1,6 @@
 import { store } from "../lib/store.js";
 import { apiModels, LOCAL_AI } from "../lib/api.js";
-import { testGeminiKey, cleanKey, pingGoogle } from "../lib/localAI.js";
+import { testGeminiKey, cleanKey, pingGoogle, hasSiteKey, effKey } from "../lib/localAI.js";
 import { CLASSES, MEDIUMS, DIFFICULTIES, COUNTS, SUBJECTS_BY_CLASS } from "../data/curriculum.js";
 export function renderSettings(el) {
   const s = store.settings();
@@ -17,17 +17,22 @@ export function renderSettings(el) {
   </div>
   <div style="margin-top:12px"><button class="btn" id="s-save">Save</button> <span id="s-msg" class=mut></span></div></div>
   <div class="card"><h3>🔑 My AI Key (for published / Pages link)</h3>
-  <p class=mut>Paste your own Gemini key to generate quizzes without any backend — the key stays only in this browser (never uploaded anywhere). Get one free at <b>aistudio.google.com/apikey</b>. Tip: restrict it to your site in Google AI Studio → API controls.</p>
+  <p class=mut id="s-sitekey-note">Paste your own Gemini key to generate quizzes without any backend — the key stays only in this browser (never uploaded anywhere). Get one free at <b>aistudio.google.com/apikey</b>. Tip: restrict it to your site in Google AI Studio → API controls.</p>
   <label>Gemini API Key</label><input id="s-key" type="password" placeholder="AIza…" autocomplete="off" />
   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec" id="s-test">Test Key</button><button class="btn ghost" id="s-del">Remove</button></div>
   <div id="s-kmsg" class=mut style="margin-top:8px"></div><div id="s-steps" class=mut style="margin-top:6px;font-size:12.5px"></div></div>`;
-  const $ = (id) => el.querySelector(id);
+  const $ = (id) => el.querySelector("#" + id);
   const setV = (id, v) => { const n = $(id); if (n) n.value = v; };
   const setH = (id, h) => { const n = $(id); if (n) n.innerHTML = h; };
   const alive = () => el.isConnected;
   setV("s-theme", s.theme || "light");
   const sc = $("s-c"); if (sc) sc.value = s.defaults?.class || "";
   setV("s-m", s.defaults?.medium || ""); setV("s-d", s.defaults?.difficulty || ""); setV("s-n", s.defaults?.count || "");
+  const fillLocal = () => {
+    setH("s-provider", LOCAL_AI.providers.map(p => `<option>${p}</option>`).join(""));
+    setH("s-model", LOCAL_AI.models.map(x => `<option>${x}</option>`).join(""));
+  };
+  fillLocal(); // instant first paint — never wait on network
   apiModels().then(m => {
     if (!alive()) return;
     const provs = m.providers?.length ? m.providers : ["groq"];
@@ -64,7 +69,11 @@ export function renderSettings(el) {
   };
   const keys = store.keys();
   const sk = $("s-key");
-  if (keys.gemini && sk) sk.placeholder = "Key saved ✓ (paste new to replace)";
+  if (hasSiteKey()) {
+    const note = $("s-sitekey-note");
+    if (note) note.innerHTML = `This published site has a <b>built-in key ✓</b> — generation works with nothing to paste. You may still add a personal key below to override it (kept only in this browser).`;
+    if (sk) sk.placeholder = "Site key active ✓ (paste personal key to override)";
+  } else if (keys.gemini && sk) sk.placeholder = "Key saved ✓ (paste new to replace)";
   const testBtn = $("s-test");
   if (testBtn) testBtn.onclick = async () => {
     const btn = $("s-test");
@@ -77,7 +86,8 @@ export function renderSettings(el) {
     if (stepsBox) stepsBox.innerHTML = "";
     const skIn = $("s-key");
     const raw = skIn ? skIn.value : "";
-    const k = raw.trim() || store.keys().gemini;
+    const typed = raw.trim();
+    const k = effKey(typed || store.keys().gemini);
     steps("1. Button works — starting test…");
     await new Promise(r => setTimeout(r, 50));
     try {
@@ -93,7 +103,7 @@ export function renderSettings(el) {
     try {
       steps("3. Contacting Google…");
       await testGeminiKey(k, (s) => steps(s));
-      store.saveKeys({ gemini: cleanKey(k) });
+      if (typed) store.saveKeys({ gemini: cleanKey(typed) });
       say("✓ Key works and is saved.");
       steps("4. Done — success.");
     }
