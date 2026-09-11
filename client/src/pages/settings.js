@@ -1,6 +1,6 @@
 import { store } from "../lib/store.js";
 import { apiModels, LOCAL_AI } from "../lib/api.js";
-import { testGeminiKey, cleanKey } from "../lib/localAI.js";
+import { testGeminiKey, cleanKey, pingGoogle } from "../lib/localAI.js";
 import { CLASSES, MEDIUMS, DIFFICULTIES, COUNTS, SUBJECTS_BY_CLASS } from "../data/curriculum.js";
 export function renderSettings(el) {
   const s = store.settings();
@@ -80,6 +80,14 @@ export function renderSettings(el) {
     const k = raw.trim() || store.keys().gemini;
     steps("1. Button works — starting test…");
     await new Promise(r => setTimeout(r, 50));
+    try {
+      await pingGoogle((s) => steps(s));
+    } catch (e) {
+      say("✗ " + e.message);
+      steps("STOPPED: network path blocked — key cannot be tested until this passes.");
+      btn.disabled = false;
+      return;
+    }
     steps(`2. Key seen: ${k ? `yes (${cleanKey(k).length} chars)` : "NO — empty box and none saved"}`);
     say("Checking...");
     try {

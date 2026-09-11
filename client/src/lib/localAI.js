@@ -155,6 +155,29 @@ const httpErr = (r) => {
   return `Key check failed (HTTP ${r.status}).`;
 };
 
+// Is Google AI reachable at all from this browser (no key needed)?
+// Any HTTP response (even 400) = reachable. Network throw = blocked.
+export async function pingGoogle(say) {
+  const log = (t) => { try { say && say(t); } catch (_) {} };
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    log("0. Checking internet path to Google AI…");
+    const r = await fetch(`${GROOT}/v1beta/models`, { signal: ctrl.signal });
+    log(`0. Google answered (HTTP ${r.status}) — path is open.`);
+    return true;
+  } catch (e) {
+    const msg = e.name === "AbortError"
+      ? "Google AI is unreachable from this browser (15s, no answer). Try mobile data / different WiFi, or disable ad-blocker/VPN."
+      : "Google AI is unreachable from this browser (" + e.message + "). Try mobile data / different WiFi, or disable ad-blocker/VPN.";
+    const err = new Error(msg);
+    err.debug = JSON.stringify({ ping: e.name + ": " + e.message });
+    throw err;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export async function testGeminiKey(key, say) {
   const log = (t) => { try { say && say(t); } catch (_) {} };
   key = cleanKey(key);
