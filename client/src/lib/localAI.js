@@ -155,13 +155,16 @@ const httpErr = (r) => {
   return `Key check failed (HTTP ${r.status}).`;
 };
 
-export async function testGeminiKey(key) {
+export async function testGeminiKey(key, say) {
+  const log = (t) => { try { say && say(t); } catch (_) {} };
   key = cleanKey(key);
   if (!key) throw new Error("Paste a key first.");
   if (/^gsk_/.test(key)) throw new Error("That's a Groq key — this box needs a Gemini key (starts with AIza).");
   const dbg = { tried: [], at: new Date().toISOString() };
   try {
+    log("3a. Trying secure header mode…");
     const r = await gfetch("/v1beta/models", key, {}, 25000, dbg);
+    log("3b. Google answered (HTTP " + r.status + ")…");
     if (!r.ok) {
       const e = new Error(httpErr(r));
       e.debug = JSON.stringify({ ...dbg, http: r.status });

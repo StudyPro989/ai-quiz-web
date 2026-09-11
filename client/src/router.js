@@ -9,6 +9,17 @@ import { store } from "./lib/store.js";
 const NAV = [["#/dashboard", "🏠 Dashboard"], ["#/create", "➕ Create Quiz"], ["#/quizzes", "📚 My Quizzes"], ["#/performance", "📊 Performance"], ["#/settings", "⚙️ Settings"]];
 
 export function startApp() {
+  window.addEventListener("error", (ev) => {
+    try {
+      if (document.getElementById("app-crash")) return;
+      const d = document.createElement("div");
+      d.id = "app-crash";
+      d.style.cssText = "position:fixed;left:10px;right:10px;bottom:76px;z-index:99;background:#fef2f2;border:1.5px solid #f3b8b8;border-radius:14px;padding:12px 14px;font-size:13px;color:#991b1b";
+      d.innerHTML = `<b>⚠️ Page error:</b> ${String(ev.message || "unknown").slice(0, 160)} <button id="app-crash-x" style="float:right">✕</button><div class=mut>Hard-refresh (Ctrl+Shift+R). If it repeats, screenshot this.</div>`;
+      document.body.appendChild(d);
+      document.getElementById("app-crash-x").onclick = () => d.remove();
+    } catch (_) {}
+  });
   document.body.classList.toggle("dark", store.settings().theme === "dark");
   const app = document.getElementById("app");
   app.innerHTML = `<aside><div class="logo">🎓 Quiz<span>Trainer</span></div><nav id="side"></nav><div class="side-foot">Self-paced practice<br>No timers, just learning.</div></aside><main id="view"></main><nav class="mob" id="mob"></nav>`;
