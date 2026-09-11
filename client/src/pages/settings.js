@@ -1,6 +1,6 @@
 import { store } from "../lib/store.js";
 import { apiModels, LOCAL_AI } from "../lib/api.js";
-import { testGeminiKey, testGroqKey, cleanKey, pingGoogle, hasSiteKey, effKey, siteKey } from "../lib/localAI.js";
+import { testGeminiKey, testGroqKey, cleanKey, pingGoogle, hasSiteKey, effKey, siteKey, modelsFor } from "../lib/localAI.js";
 import { CLASSES, MEDIUMS, DIFFICULTIES, COUNTS, SUBJECTS_BY_CLASS } from "../data/curriculum.js";
 export function renderSettings(el) {
   const s = store.settings();
