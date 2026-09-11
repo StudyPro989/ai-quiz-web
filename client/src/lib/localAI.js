@@ -130,24 +130,29 @@ export const cleanKey = (k) => String(k || "").replace(/[\s'"]+/g, "");
 
 const GROOT = "https://generativelanguage.googleapis.com";
 // Header first, `?key=` fallback (avoids preflight/header-stripping issues).
-async function gfetch(path, key, init = {}, timeoutMs = 25000, dbg = null) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  const attempt = (asQuery, tag) => {
-    if (dbg) dbg.tried.push(tag);
-    const url = asQuery ? `${GROOT}${path}?key=${encodeURIComponent(key)}` : `${GROOT}${path}`;
-    const headers = { ...(init.headers || {}) };
-    if (!asQuery) headers["x-goog-api-key"] = key;
-    return fetch(url, { ...init, headers, signal: ctrl.signal });
-  };
-  try {
-    try { return await attempt(false, "header"); }
-    catch (e) {
-      if (e.name === "AbortError") throw e;
-      if (dbg) dbg.headerErr = e.name + ": " + e.message;
-      return await attempt(true, "query");
+// first: "header" | "query" — GET checks use query-first (no preflight at all).
+async function gfetch(path, key, init = {}, timeoutMs = 25000, dbg = null, first = "header") {
+  const order = first === "query" ? [true, false] : [false, true];
+  let lastErr = null;
+  for (const asQuery of order) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), Math.ceil(timeoutMs / order.length));
+    const tag = asQuery ? "query" : "header";
+    try {
+      if (dbg) dbg.tried.push(tag);
+      const url = asQuery ? `${GROOT}${path}?key=${encodeURIComponent(key)}` : `${GROOT}${path}`;
+      const headers = { ...(init.headers || {}) };
+      if (!asQuery) headers["x-goog-api-key"] = key;
+      const r = await fetch(url, { ...init, headers, signal: ctrl.signal });
+      clearTimeout(t);
+      return r;
+    } catch (e) {
+      clearTimeout(t);
+      lastErr = e;
+      if (dbg) dbg[tag + "Err"] = e.name + ": " + e.message;
     }
-  } finally { clearTimeout(t); }
+  }
+  throw lastErr;
 }
 const httpErr = (r) => {
   if (r.status === 400 || r.status === 403) return "Invalid Gemini API key (or it's restricted for this site).";
@@ -185,8 +190,8 @@ export async function testGeminiKey(key, say) {
   if (/^gsk_/.test(key)) throw new Error("That's a Groq key — this box needs a Gemini key (starts with AIza).");
   const dbg = { tried: [], at: new Date().toISOString() };
   try {
-    log("3a. Trying secure header mode…");
-    const r = await gfetch("/v1beta/models", key, {}, 25000, dbg);
+    log("3a. Testing key (preflight-free mode)…");
+    const r = await gfetch("/v1beta/models", key, {}, 30000, dbg, "query");
     log("3b. Google answered (HTTP " + r.status + ")…");
     if (!r.ok) {
       const e = new Error(httpErr(r));
