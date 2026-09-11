@@ -21,7 +21,7 @@ export function renderSettings(el) {
   <label>Gemini API Key</label><input id="s-key" type="password" placeholder="AIza…" autocomplete="off" />
   <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sec" id="s-test">Test Key</button><button class="btn ghost" id="s-del">Remove</button></div>
   <div id="s-kmsg" class=mut style="margin-top:8px"></div><div id="s-steps" class=mut style="margin-top:6px;font-size:12.5px"></div></div>`;
-  const $ = (id) => el.querySelector("#" + id);
+  const $ = (id) => el.querySelector(id.startsWith("#") ? id : "#" + id);
   const setV = (id, v) => { const n = $(id); if (n) n.value = v; };
   const setH = (id, h) => { const n = $(id); if (n) n.innerHTML = h; };
   const alive = () => el.isConnected;

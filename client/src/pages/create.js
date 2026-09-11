@@ -30,7 +30,7 @@ export function renderCreate(el, ctx) {
   <div style="margin-top:14px"><button class="btn" id="f-go">🚀 Generate Quiz</button> <span id="f-msg" class="mut"></span></div></div></div></div>
   <div id="f-err"></div>`;
 
-  const $ = (id) => el.querySelector("#" + id);
+  const $ = (id) => el.querySelector(id.startsWith("#") ? id : "#" + id);
   const alive = () => el.isConnected;
   const setH = (id, h) => { const n = $(id); if (n) n.innerHTML = h; };
   const setV = (id, v) => { const n = $(id); if (n) n.value = v; };
