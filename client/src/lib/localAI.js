@@ -125,9 +125,13 @@ export function validateLocal(raw, cfg) {
   return { quiz: { title: d.title || `Class ${cfg.class} ${cfg.subject} - ${cfg.topic}`, class: cfg.class, subject: cfg.subject, medium: cfg.medium, topic: cfg.topic, difficulty: cfg.difficulty, questionTypes: cfg.questionTypes, questions: d.questions, createdAt: new Date().toISOString() } };
 }
 
+// Gemini keys have no whitespace — strip it all (catches broken pastes).
+export const cleanKey = (k) => String(k || "").replace(/[\s'"]+/g, "");
+
 export async function testGeminiKey(key) {
-  if (!key || !key.trim()) throw new Error("Paste a key first.");
-  if (/^gsk_/.test(key.trim())) throw new Error("That's a Groq key — this box needs a Gemini key (starts with AIza).");
+  key = cleanKey(key);
+  if (!key) throw new Error("Paste a key first.");
+  if (/^gsk_/.test(key)) throw new Error("That's a Groq key — this box needs a Gemini key (starts with AIza).");
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 25000);
   try {
@@ -146,6 +150,7 @@ export async function testGeminiKey(key) {
 }
 
 async function geminiCall(prompt, key, model) {
+  key = cleanKey(key);
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 90000);
   try {
