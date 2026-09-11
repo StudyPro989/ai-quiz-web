@@ -126,10 +126,23 @@ export function validateLocal(raw, cfg) {
 }
 
 export async function testGeminiKey(key) {
-  const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models", { headers: { "x-goog-api-key": key } });
-  if (r.status === 400 || r.status === 403) throw new Error("Invalid Gemini API key.");
-  if (!r.ok) throw new Error(`Key check failed (${r.status}).`);
-  return true;
+  if (!key || !key.trim()) throw new Error("Paste a key first.");
+  if (/^gsk_/.test(key.trim())) throw new Error("That's a Groq key — this box needs a Gemini key (starts with AIza).");
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 25000);
+  try {
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models", { headers: { "x-goog-api-key": key.trim() }, signal: ctrl.signal });
+    if (r.status === 400 || r.status === 403) throw new Error("Invalid Gemini API key (or it's restricted for this site).");
+    if (r.status === 429) throw new Error("Rate limited — try again in a minute.");
+    if (!r.ok) throw new Error(`Key check failed (${r.status}).`);
+    return true;
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("Timed out — check your internet and retry.");
+    if (/fetch|network|load failed/i.test(e.message)) throw new Error("Network blocked — check internet / ad-blocker, then retry.");
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 async function geminiCall(prompt, key, model) {

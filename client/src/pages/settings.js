@@ -51,10 +51,17 @@ export function renderSettings(el) {
   const keys = store.keys();
   if (keys.gemini) $("s-key").placeholder = "Key saved ✓ (paste new to replace)";
   $("s-test").onclick = async () => {
+    const btn = $("s-test");
+    btn.disabled = true;
     const k = $("s-key").value.trim() || store.keys().gemini;
     $("s-kmsg").textContent = "Checking...";
-    try { await testGeminiKey(k); $("s-kmsg").textContent = "✓ Key works."; }
+    try {
+      await testGeminiKey(k);
+      store.saveKeys({ gemini: k.trim() });
+      $("s-kmsg").textContent = "✓ Key works and is saved.";
+    }
     catch (e) { $("s-kmsg").textContent = "✗ " + e.message; }
+    finally { btn.disabled = false; }
   };
   $("s-del").onclick = () => { store.saveKeys({ gemini: "" }); $("s-key").value = ""; $("s-key").placeholder = "AIza…"; $("s-kmsg").textContent = "Removed."; };
 }
