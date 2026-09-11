@@ -1,6 +1,6 @@
 import { store } from "../lib/store.js";
 import { apiModels, LOCAL_AI } from "../lib/api.js";
-import { testGeminiKey } from "../lib/localAI.js";
+import { testGeminiKey, cleanKey } from "../lib/localAI.js";
 import { CLASSES, MEDIUMS, DIFFICULTIES, COUNTS, SUBJECTS_BY_CLASS } from "../data/curriculum.js";
 export function renderSettings(el) {
   const s = store.settings();
@@ -57,10 +57,18 @@ export function renderSettings(el) {
     $("s-kmsg").textContent = "Checking...";
     try {
       await testGeminiKey(k);
-      store.saveKeys({ gemini: k.trim() });
+      store.saveKeys({ gemini: cleanKey(k) });
       $("s-kmsg").textContent = "✓ Key works and is saved.";
     }
-    catch (e) { $("s-kmsg").textContent = "✗ " + e.message; }
+    catch (e) {
+      $("s-kmsg").innerHTML = `✗ ${e.message} <button class="btn ghost" id="s-dbg" style="padding:4px 10px;font-size:12px">Copy debug</button>`;
+      const d = $("s-dbg");
+      if (d) d.onclick = async () => {
+        const info = `Gemini key test failed\nTime: ${new Date().toISOString()}\nPage: ${location.href}\nError: ${e.message}\nDebug: ${e.debug || "n/a"}\nUA: ${navigator.userAgent}`;
+        try { await navigator.clipboard.writeText(info); d.textContent = "✓ Copied — send this"; }
+        catch { prompt("Copy the debug info:", info); }
+      };
+    }
     finally { btn.disabled = false; }
   };
   $("s-del").onclick = () => { store.saveKeys({ gemini: "" }); $("s-key").value = ""; $("s-key").placeholder = "AIza…"; $("s-kmsg").textContent = "Removed."; };

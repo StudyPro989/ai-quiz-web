@@ -128,42 +128,70 @@ export function validateLocal(raw, cfg) {
 // Gemini keys have no whitespace — strip it all (catches broken pastes).
 export const cleanKey = (k) => String(k || "").replace(/[\s'"]+/g, "");
 
+const GROOT = "https://generativelanguage.googleapis.com";
+// Header first, `?key=` fallback (avoids preflight/header-stripping issues).
+async function gfetch(path, key, init = {}, timeoutMs = 25000, dbg = null) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  const attempt = (asQuery, tag) => {
+    if (dbg) dbg.tried.push(tag);
+    const url = asQuery ? `${GROOT}${path}?key=${encodeURIComponent(key)}` : `${GROOT}${path}`;
+    const headers = { ...(init.headers || {}) };
+    if (!asQuery) headers["x-goog-api-key"] = key;
+    return fetch(url, { ...init, headers, signal: ctrl.signal });
+  };
+  try {
+    try { return await attempt(false, "header"); }
+    catch (e) {
+      if (e.name === "AbortError") throw e;
+      if (dbg) dbg.headerErr = e.name + ": " + e.message;
+      return await attempt(true, "query");
+    }
+  } finally { clearTimeout(t); }
+}
+const httpErr = (r) => {
+  if (r.status === 400 || r.status === 403) return "Invalid Gemini API key (or it's restricted for this site).";
+  if (r.status === 429) return "Rate limited — try again in a minute.";
+  return `Key check failed (HTTP ${r.status}).`;
+};
+
 export async function testGeminiKey(key) {
   key = cleanKey(key);
   if (!key) throw new Error("Paste a key first.");
   if (/^gsk_/.test(key)) throw new Error("That's a Groq key — this box needs a Gemini key (starts with AIza).");
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 25000);
+  const dbg = { tried: [], at: new Date().toISOString() };
   try {
-    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models", { headers: { "x-goog-api-key": key.trim() }, signal: ctrl.signal });
-    if (r.status === 400 || r.status === 403) throw new Error("Invalid Gemini API key (or it's restricted for this site).");
-    if (r.status === 429) throw new Error("Rate limited — try again in a minute.");
-    if (!r.ok) throw new Error(`Key check failed (${r.status}).`);
+    const r = await gfetch("/v1beta/models", key, {}, 25000, dbg);
+    if (!r.ok) {
+      const e = new Error(httpErr(r));
+      e.debug = JSON.stringify({ ...dbg, http: r.status });
+      throw e;
+    }
     return true;
   } catch (e) {
-    if (e.name === "AbortError") throw new Error("Timed out — check your internet and retry.");
-    if (/fetch|network|load failed/i.test(e.message)) throw new Error("Network blocked — check internet / ad-blocker, then retry.");
+    if (!e.debug) {
+      e.debug = JSON.stringify({ ...dbg, err: e.name + ": " + e.message });
+      if (e.name === "AbortError") e.message = "Timed out — check your internet and retry.";
+      else if (/fetch|network|load failed/i.test(e.message)) e.message = "Network blocked — check internet / ad-blocker, then retry.";
+    }
     throw e;
-  } finally {
-    clearTimeout(t);
   }
 }
 
 async function geminiCall(prompt, key, model) {
   key = cleanKey(key);
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 90000);
+  const dbg = { tried: [] };
+  const body = {
+    systemInstruction: { parts: [{ text: "Return valid JSON only. No markdown fences." }] },
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.5, maxOutputTokens: 8000, responseMimeType: "application/json" }
+  };
   try {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    const r = await gfetch(`/v1beta/models/${encodeURIComponent(model)}:generateContent`, key, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: "Return valid JSON only. No markdown fences." }] },
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 8000, responseMimeType: "application/json" }
-      }),
-      signal: ctrl.signal
-    });
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }, 90000, dbg);
     if (r.status === 429) throw new Error("Rate limit — please try again shortly.");
     if (r.status === 400) throw new Error("AI rejected the request (model name or quota).");
     if (r.status === 403 || r.status === 401) throw new Error("Invalid Gemini API key. Check Settings.");
@@ -174,9 +202,8 @@ async function geminiCall(prompt, key, model) {
     return text;
   } catch (e) {
     if (e.name === "AbortError") throw new Error("AI request timed out. Please try again.");
+    if (!/Rate limit|rejected|Invalid|provider error|Empty/.test(e.message)) e.message += " [net:" + (dbg.tried.join(",") || "none") + "]";
     throw e;
-  } finally {
-    clearTimeout(t);
   }
 }
 
