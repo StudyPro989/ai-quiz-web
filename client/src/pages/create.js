@@ -129,31 +129,45 @@ export function renderCreate(el, ctx) {
     if (!payload.questionTypes.length) { if (msg) msg.textContent = "Select at least one question type."; return; }
     busy = true;
     const btn = $("f-go"); if (btn) btn.disabled = true;
-    let li = 0;
+    let li = 0, tick = 0;
+    const t0 = Date.now();
+    let waitUntil = 0, waitWhy = "";
     const target = `Class ${payload.class} · ${payload.subject}${payload.subSubject ? " (" + payload.subSubject + ")" : ""} · ${payload.topic} · ${payload.questionCount} Qs · ${backendUp ? payload.provider + "/" + payload.model : "direct/browser-key"}`;
-    if (msg) msg.textContent = `Generating for ${target}...`;
-    const iv = setInterval(() => { li = (li + 1) % LOADS.length; if (alive() && msg) msg.textContent = `${LOADS[li]} (${target})`; }, 1600);
+    const renderMsg = () => {
+      if (!alive() || !msg) return;
+      const s = Math.floor((Date.now() - t0) / 1000);
+      if (Date.now() < waitUntil) {
+        const left = Math.ceil((waitUntil - Date.now()) / 1000);
+        msg.textContent = `⏳ ${waitWhy === "rate" ? "Rate limited — cooling down" : "Retrying"}… ${left}s (${target}) · ${s}s elapsed`;
+      } else {
+        msg.textContent = `${LOADS[li]} (${target}) · ${s}s`;
+      }
+    };
+    renderMsg();
+    const iv = setInterval(() => { tick++; if (tick % 2 === 0) li = (li + 1) % LOADS.length; renderMsg(); }, 1000);
+    const stopIv = () => clearInterval(iv);
     if (btn) btn.innerHTML = `<span class="spin"></span> Generating...`;
     const doneBtn = () => { busy = false; if (btn) { btn.disabled = false; btn.textContent = "🚀 Generate Quiz"; } };
+    const onEvent = (e) => { if (e && e.t === "wait") { waitUntil = Date.now() + e.ms; waitWhy = e.why || ""; renderMsg(); } };
     try {
       let quiz;
       if (backendUp) {
         const j = await apiGenerate(payload);
-        clearInterval(iv);
+        stopIv();
         quiz = { ...j.quiz, id: uid(), config: payload };
       } else {
         const prov = payload.provider === "groq" ? "groq" : "gemini";
         const key = offlineKeyFor(prov);
-        if (!key) { clearInterval(iv); showNoKey(target); doneBtn(); return; }
+        if (!key) { stopIv(); showNoKey(target); doneBtn(); return; }
         const model = offlineModelFor(prov, payload.model);
-        const q = await generateQuizDirect({ ...payload, provider: prov }, key, model, prov);
-        clearInterval(iv);
+        const q = await generateQuizDirect({ ...payload, provider: prov }, key, model, prov, onEvent);
+        stopIv();
         quiz = { ...q, id: uid(), config: { ...payload, provider: prov, model } };
       }
       store.saveQuiz(quiz);
       location.hash = `#/quiz/${quiz.id}`;
     } catch (e) {
-      clearInterval(iv);
+      stopIv();
       showGenError(target, payload, e);
       doneBtn();
     }
@@ -169,14 +183,26 @@ export function renderCreate(el, ctx) {
   function showGenError(target, payload, e) {
     const at = new Date().toLocaleString();
     const ref = e.requestId ? ` · Ref: ${e.requestId}` : "";
+    const isRate = /rate limit/i.test(e.message || "");
     const tech = `Time: ${at}\nTried: ${target}\nTypes: ${(payload.questionTypes || []).join(", ")}\nDifficulty: ${payload.difficulty}\nModel: ${payload.model || "server default"}\nError: ${e.message}${e.status ? ` (HTTP ${e.status})` : ""}${e.requestId ? `\nRef: ${e.requestId}` : ""}`;
     setH("f-err", `<div class="card" style="border:1.5px solid #f3b8b8"><h3>⚠️ Quiz generation failed</h3>
       <p><b>Tried:</b> ${target}</p>
-      <div class="fb bad"><b>Bug:</b> ${e.message || "Unknown error"}<p class=mut style="margin:6px 0 0">${at}${ref}</p></div>
-      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="f-retry">↻ Try Again</button><button class="btn sec" id="f-copy">📋 Copy bug details</button></div>
+      <div class="fb bad"><b>Bug:</b> ${e.message || "Unknown error"}${isRate ? `<p class=mut style="margin:6px 0 0">Rate limits reset every minute — retrying after a short wait usually works.</p>` : ""}<p class=mut style="margin:6px 0 0">${at}${ref}</p></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="f-retry">↻ Try Again</button><button class="btn sec" id="f-wait">⏳ Retry in 60s</button><button class="btn ghost" id="f-copy">📋 Copy bug details</button></div>
       <details style="margin-top:10px"><summary class=mut>Technical details</summary><pre class=mut style="white-space:pre-wrap">${tech}</pre></details></div>`);
-    const rt = el.querySelector("#f-retry"), cp = el.querySelector("#f-copy"), go2 = $("f-go");
+    const rt = el.querySelector("#f-retry"), cp = el.querySelector("#f-copy"), go2 = $("f-go"), wt = el.querySelector("#f-wait");
     if (rt) rt.onclick = () => { setH("f-err", ""); if (go2) go2.click(); };
+    if (wt) wt.onclick = () => {
+      wt.disabled = true;
+      let left = 60;
+      wt.textContent = `⏳ Retrying in ${left}s… (tap Try Again to go now)`;
+      const iv2 = setInterval(() => {
+        left--;
+        if (left <= 0) { clearInterval(iv2); setH("f-err", ""); if (go2) go2.click(); }
+        else if (wt.isConnected) wt.textContent = `⏳ Retrying in ${left}s… (tap Try Again to go now)`;
+        else clearInterval(iv2);
+      }, 1000);
+    };
     if (cp) cp.onclick = async () => {
       try { await navigator.clipboard.writeText(`Quiz generation bug report\n${tech}`); cp.textContent = "✓ Copied"; }
       catch { prompt("Copy the bug details:", tech); }

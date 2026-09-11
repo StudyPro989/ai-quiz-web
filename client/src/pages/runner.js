@@ -113,7 +113,7 @@ export function renderRunner(el, id) {
       <select id="rep-reason">${REASONS.map(([v, l]) => `<option value="${v}" ${r.reason === v ? "selected" : ""}>${l}</option>`).join("")}</select>
       <div style="margin-top:8px"><label>Note (optional)</label><input id="rep-note" placeholder="e.g. option B is also correct" value="${esc(r.note || "")}" /></div>
       ${r.err ? `<div class="fb bad">${esc(r.err)}</div>` : ""}
-      <div style="margin-top:10px"><button class="btn" id="rep-go" ${r.busy ? "disabled" : ""}>${r.busy ? `<span class="spin"></span> Regenerating...` : "↻ AI: regenerate this question"}</button></div>
+      <div style="margin-top:10px"><button class="btn" id="rep-go" ${r.busy ? "disabled" : ""}>${r.busy ? `<span class="spin"></span> Regenerating...` : "↻ AI: regenerate this question"}</button>${r.busy && r.wait ? `<div class=mut style="margin-top:6px">${r.wait}</div>` : ""}</div>
     </div></div></div>`;
   }
 
@@ -143,7 +143,7 @@ export function renderRunner(el, id) {
         paint();
       };
       const failShow = (e) => {
-        st.rep.busy = false;
+        st.rep.busy = false; st.rep.wait = null;
         st.rep.err = `Bug: ${e.message || "Regeneration failed. Please try again."}${e.requestId ? ` [Ref: ${e.requestId}]` : ""} — press the button again to retry.`;
         paint();
       };
@@ -157,10 +157,27 @@ export function renderRunner(el, id) {
         if (!offline || !key) { failShow(e); return; }
         try {
           const model = offlineModelFor(prov, quiz.config?.provider === prov ? quiz.config?.model : undefined);
+          const t0 = Date.now();
           const nq = await regenerateDirect(
             { class: quiz.class, subject: quiz.subject, medium: quiz.medium, topic: quiz.topic, difficulty: quiz.difficulty, questionTypes: [q.type] },
             { type: q.type, badQuestion: base.badQuestion, badOptions: base.badOptions, reason: base.reason, note: base.note },
-            key, model, prov
+            key, model, prov,
+            (e) => {
+              if (e && e.t === "wait") {
+                st.rep.waitUntil = Date.now() + e.ms;
+                st.rep.wait = `⏳ ${e.why === "rate" ? "Rate limited — cooling down" : "Retrying"}…`;
+                paint();
+                const iv3 = setInterval(() => {
+                  const left = Math.ceil((st.rep.waitUntil - Date.now()) / 1000);
+                  if (!st.rep || !st.rep.busy || left <= 0) { clearInterval(iv3); return; }
+                  st.rep.wait = `⏳ ${e.why === "rate" ? "Rate limited — cooling down" : "Retrying"}… ${left}s`;
+                  paint();
+                }, 1000);
+              } else if (e && e.t === "attempt") {
+                st.rep.wait = `🔄 Working… ${Math.floor((Date.now() - t0) / 1000)}s elapsed`;
+                paint();
+              }
+            }
           );
           finishOk(nq);
         } catch (e2) { failShow(e2); }

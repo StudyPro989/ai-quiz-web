@@ -403,7 +403,9 @@ const FATAL_RE = /Invalid (Gemini|Groq)|rejected \(|AI_API_KEY|GEMINI_API_KEY/;
 const SMALL_MODEL_RE = /allam|safeguard|flash-lite|compound-mini|gpt-oss-20b|qwen/i;
 export const chunkFor = (model) => SMALL_MODEL_RE.test(model || "") ? 5 : 10;
 
-export async function generateQuizDirect(cfg, key, model, provider = "gemini") {
+export async function generateQuizDirect(cfg, key, model, provider = "gemini", onEvent) {
+  const say = (e) => { try { onEvent && onEvent(e); } catch (_) {} };
+  const nap = async (ms, why) => { if (ms > 0) { say({ t: "wait", ms, why }); await sleep(ms); } };
   const per = chunkFor(model);
   const small = per <= 5;
   const parts = [];
@@ -421,18 +423,19 @@ export async function generateQuizDirect(cfg, key, model, provider = "gemini") {
     let batch = [];
     let lastErr = "unknown error";
     for (const wait of [0, 5000, 12000]) {
-      if (wait) await sleep(wait);
+      await nap(wait, "retry");
       try {
+        say({ t: "attempt" });
         const r = await fetchBatch(n, []);
         if (!r.error) { batch = r.quiz.questions; break; }
         lastErr = r.error;
         if (isFatal(lastErr)) break;
-        if (/Rate limit/i.test(lastErr)) { await sleep(45000); continue; }
+        if (/Rate limit/i.test(lastErr)) { await nap(45000, "rate"); continue; }
         if (r.partial?.length) { batch = r.partial.slice(); break; }
       } catch (e) {
         lastErr = e.message || "AI request failed";
         if (isFatal(lastErr)) break;
-        if (/Rate limit/i.test(lastErr)) { await sleep(45000); continue; }
+        if (/Rate limit/i.test(lastErr)) { await nap(45000, "rate"); continue; }
         if (!isRetryable(lastErr)) break;
       }
     }
@@ -457,9 +460,12 @@ export async function generateQuizDirect(cfg, key, model, provider = "gemini") {
   return { title: `Class ${cfg.class} ${cfg.subject} - ${cfg.topic}`, class: cfg.class, subject: cfg.subject, medium: cfg.medium, topic: cfg.topic, difficulty: cfg.difficulty, questionTypes: cfg.questionTypes, questions, createdAt: new Date().toISOString(), direct: true, provider };
 }
 
-export async function regenerateDirect(cfg, fix, key, model, provider = "gemini") {
+export async function regenerateDirect(cfg, fix, key, model, provider = "gemini", onEvent) {
+  const say = (e) => { try { onEvent && onEvent(e); } catch (_) {} };
   let lastErr = "unknown error";
   for (let a = 0; a < 2; a++) {
+    if (a) await sleep(5000);
+    say({ t: "attempt" });
     try {
       const raw = await directCall(provider, buildPromptLocal({ ...cfg, questionCount: 1, questionTypes: [fix.type] }, fix), key, model);
       const { quiz, error } = validateLocal(raw, { ...cfg, questionCount: 1, questionTypes: [fix.type] });
